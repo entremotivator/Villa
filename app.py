@@ -280,11 +280,45 @@ def authenticate_google_sheets(creds_dict: Dict[str, Any]) -> Optional[gspread.C
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         client = gspread.authorize(creds)
         log_activity("Successfully authenticated with Google Sheets", "success")
+        
+        # Auto-load default spreadsheet
+        try:
+            default_worksheet = get_worksheet(client, ORIGINAL_SPREADSHEET_ID)
+            if default_worksheet:
+                st.session_state.worksheet = default_worksheet
+                st.session_state.current_spreadsheet_id = ORIGINAL_SPREADSHEET_ID
+                st.session_state.spreadsheet_url = ORIGINAL_SPREADSHEET_URL
+                st.session_state.default_sheet_loaded = True
+                log_activity("Default spreadsheet loaded successfully", "success")
+        except Exception as e:
+            log_activity(f"Could not auto-load default sheet: {str(e)}", "error")
+        
         return client
     except Exception as e:
         log_activity(f"Authentication failed: {str(e)}", "error")
         st.error(f"Authentication failed: {str(e)}")
         return None
+
+def add_to_drive(client: gspread.Client, spreadsheet_id: str) -> bool:
+    """Add a spreadsheet to user's Drive by creating a copy"""
+    try:
+        source = client.open_by_key(spreadsheet_id)
+        new_title = f"{source.title} - Added {datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Create a copy which automatically adds to Drive
+        new_spreadsheet = client.copy(spreadsheet_id, title=new_title, copy_permissions=False)
+        
+        # Share with notification email
+        try:
+            new_spreadsheet.share(NOTIFICATION_EMAIL, perm_type='user', role='writer')
+            log_activity(f"Added to Drive and shared: {new_title}", "success")
+        except Exception as e:
+            log_activity(f"Added to Drive but failed to share: {str(e)}", "error")
+        
+        return True
+    except Exception as e:
+        log_activity(f"Failed to add to Drive: {str(e)}", "error")
+        return False
 
 def get_all_spreadsheets(client: gspread.Client) -> List[Dict[str, str]]:
     """Get all spreadsheets from Google Drive"""
@@ -554,6 +588,15 @@ def render_spreadsheet_selector():
     
     if st.session_state.authenticated and st.session_state.client:
         
+        # Show default sheet status
+        if st.session_state.default_sheet_loaded:
+            st.sidebar.markdown("""
+            <div class="sidebar-card" style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); border-left: 4px solid #38ef7d;">
+                <h4 style="color: #155724;">✅ Default Sheet Loaded</h4>
+                <p style="color: #155724; font-size: 12px;">Original template is ready to use</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
         # Auto-load spreadsheets on first authentication
         if not st.session_state.auto_loaded_sheets:
             with st.spinner("Loading your spreadsheets..."):
@@ -561,7 +604,7 @@ def render_spreadsheet_selector():
                 st.session_state.available_spreadsheets = spreadsheets
                 st.session_state.auto_loaded_sheets = True
         
-        # Original template link
+        # Original template link with Add to Drive button
         st.sidebar.markdown("### 📄 Original Template")
         st.sidebar.markdown(f"""
         <div class="sidebar-card">
@@ -571,6 +614,31 @@ def render_spreadsheet_selector():
             <p style="margin-top: 0.5rem; font-size: 11px;">Base template for all bookings</p>
         </div>
         """, unsafe_allow_html=True)
+        
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            if st.button("➕ Add to Drive", use_container_width=True, help="Copy to your Google Drive"):
+                with st.spinner("Adding to Drive..."):
+                    if add_to_drive(st.session_state.client, ORIGINAL_SPREADSHEET_ID):
+                        st.sidebar.success("✅ Added to Drive!")
+                        # Refresh spreadsheet list
+                        spreadsheets = get_all_spreadsheets(st.session_state.client)
+                        st.session_state.available_spreadsheets = spreadsheets
+                        st.rerun()
+                    else:
+                        st.sidebar.error("Failed to add")
+        
+        with col2:
+            if st.button("🔄 Use Default", use_container_width=True, help="Load original template"):
+                with st.spinner("Loading..."):
+                    worksheet = get_worksheet(st.session_state.client, ORIGINAL_SPREADSHEET_ID)
+                    if worksheet:
+                        st.session_state.worksheet = worksheet
+                        st.session_state.current_spreadsheet_id = ORIGINAL_SPREADSHEET_ID
+                        st.session_state.spreadsheet_url = ORIGINAL_SPREADSHEET_URL
+                        st.session_state.default_sheet_loaded = True
+                        log_activity("Default spreadsheet loaded", "success")
+                        st.rerun()
         
         # Clone functionality with improved UI
         st.sidebar.markdown("### 📋 Clone Template")
@@ -627,25 +695,25 @@ def render_spreadsheet_selector():
         if st.session_state.available_spreadsheets:
             # Filter for cloned/copied spreadsheets
             all_sheets = st.session_state.available_spreadsheets
-            cloned_sheets = [s for s in all_sheets if 'Copy of' in s['title'] or 'Villa' in s['title']]
+            cloned_sheets = [s for s in all_sheets if 'Copy of' in s['title'] or 'Villa' in s['title'] or 'Added' in s['title']]
             
             st.sidebar.markdown(f"""
             <div class="sidebar-card">
                 <h4>📊 Sheet Statistics</h4>
                 <p>Total sheets: <strong>{len(all_sheets)}</strong></p>
-                <p>Cloned sheets: <strong>{len(cloned_sheets)}</strong></p>
+                <p>Cloned/Added: <strong>{len(cloned_sheets)}</strong></p>
             </div>
             """, unsafe_allow_html=True)
             
             # Tabs for filtering
             sheet_filter = st.sidebar.radio(
                 "Filter by:",
-                ["🌟 All Sheets", "📋 Cloned Sheets Only", "🔍 Search"],
+                ["🌟 All Sheets", "📋 Cloned/Added Only", "🔍 Search"],
                 label_visibility="collapsed"
             )
             
             # Determine which sheets to show
-            if sheet_filter == "📋 Cloned Sheets Only":
+            if sheet_filter == "📋 Cloned/Added Only":
                 display_sheets = cloned_sheets
             elif sheet_filter == "🔍 Search":
                 search_term = st.sidebar.text_input("🔍 Search sheets", "")
@@ -714,6 +782,10 @@ def render_spreadsheet_selector():
                     if sheet['id'] == st.session_state.current_spreadsheet_id:
                         current_sheet_name = sheet['title']
                         break
+            
+            # If it's the default sheet
+            if st.session_state.current_spreadsheet_id == ORIGINAL_SPREADSHEET_ID:
+                current_sheet_name = "Original Template (Default)"
             
             st.sidebar.markdown(f"""
             <div class="sidebar-card">
