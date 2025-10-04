@@ -122,11 +122,16 @@ st.markdown("""
         box-shadow: 0 4px 20px rgba(79, 172, 254, 0.15);
         transition: all 0.3s ease;
         border: 1px solid rgba(79, 172, 254, 0.2);
+        color: #333333;
     }
     
     .metric-card:hover {
         transform: translateY(-5px);
         box-shadow: 0 8px 30px rgba(79, 172, 254, 0.25);
+    }
+    
+    .metric-card h1, .metric-card h2, .metric-card h3, .metric-card h4, .metric-card p {
+        color: #333333;
     }
     
     .booking-card {
@@ -138,6 +143,7 @@ st.markdown("""
         border-left: 5px solid #667eea;
         transition: all 0.3s ease;
         border: 1px solid rgba(79, 172, 254, 0.2);
+        color: #333333;
     }
     
     .booking-card:hover {
@@ -151,6 +157,11 @@ st.markdown("""
         border-radius: 15px;
         box-shadow: 0 4px 20px rgba(79, 172, 254, 0.2);
         border: 1px solid rgba(79, 172, 254, 0.3);
+        color: #333333;
+    }
+    
+    .login-container h3, .login-container p {
+        color: #333333;
     }
     
     .success-message {
@@ -412,8 +423,8 @@ def render_login_sidebar():
     if not st.session_state.authenticated:
         st.sidebar.markdown("""
         <div class="login-container">
-            <h3 style="text-align: center; color: #667eea;">📁 Upload Credentials</h3>
-            <p style="text-align: center; font-size: 14px; color: #666;">
+            <h3 style="text-align: center; color: #333333;">📁 Upload Credentials</h3>
+            <p style="text-align: center; font-size: 14px; color: #555555;">
                 Upload your Google Service Account JSON file to connect
             </p>
         </div>
@@ -585,7 +596,7 @@ def main():
                 st.markdown("""
                 <div class="metric-card">
                     <h3 style="color: #667eea; margin: 0;">📊 Total</h3>
-                    <h1 style="margin: 10px 0;">{}</h1>
+                    <h1 style="margin: 10px 0; color: #333333;">{}</h1>
                 </div>
                 """.format(stats['total']), unsafe_allow_html=True)
             
@@ -593,7 +604,7 @@ def main():
                 st.markdown("""
                 <div class="metric-card">
                     <h3 style="color: #38ef7d; margin: 0;">🆕 New</h3>
-                    <h1 style="margin: 10px 0;">{}</h1>
+                    <h1 style="margin: 10px 0; color: #333333;">{}</h1>
                 </div>
                 """.format(stats['new']), unsafe_allow_html=True)
             
@@ -601,7 +612,7 @@ def main():
                 st.markdown("""
                 <div class="metric-card">
                     <h3 style="color: #00f2fe; margin: 0;">✅ Reserved</h3>
-                    <h1 style="margin: 10px 0;">{}</h1>
+                    <h1 style="margin: 10px 0; color: #333333;">{}</h1>
                 </div>
                 """.format(stats['reserved']), unsafe_allow_html=True)
             
@@ -609,7 +620,7 @@ def main():
                 st.markdown("""
                 <div class="metric-card">
                     <h3 style="color: #f5576c; margin: 0;">❌ Canceled</h3>
-                    <h1 style="margin: 10px 0;">{}</h1>
+                    <h1 style="margin: 10px 0; color: #333333;">{}</h1>
                 </div>
                 """.format(stats['canceled']), unsafe_allow_html=True)
             
@@ -617,7 +628,7 @@ def main():
                 st.markdown("""
                 <div class="metric-card">
                     <h3 style="color: #fee140; margin: 0;">🔄 Update</h3>
-                    <h1 style="margin: 10px 0;">{}</h1>
+                    <h1 style="margin: 10px 0; color: #333333;">{}</h1>
                 </div>
                 """.format(stats['update']), unsafe_allow_html=True)
             
@@ -637,8 +648,8 @@ def main():
                 for idx, row in recent_df.iterrows():
                     st.markdown(f"""
                     <div class="booking-card">
-                        <strong>🏠 {row['VILLA:']}</strong><br>
-                        📅 {row['DATE:']} | ⏰ {row['START TIME:']} - {row['END TIME:']}<br>
+                        <strong style="color: #333333;">🏠 {row['VILLA:']}</strong><br>
+                        <span style="color: #555555;">📅 {row['DATE:']} | ⏰ {row['START TIME:']} - {row['END TIME:']}</span><br>
                         <span class="status-{row['RESERVATION STATUS:'].lower().replace('!', '')}">{row['RESERVATION STATUS:']}</span>
                     </div>
                     """, unsafe_allow_html=True)
@@ -1059,7 +1070,7 @@ def main():
                 st.markdown(f"""
                 <div class="metric-card">
                     <h4 style="color: #667eea;">👤 Current Client</h4>
-                    <h2>{current_client or 'Not Set'}</h2>
+                    <h2 style="color: #333333;">{current_client or 'Not Set'}</h2>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -1067,7 +1078,7 @@ def main():
                 st.markdown(f"""
                 <div class="metric-card">
                     <h4 style="color: #764ba2;">🏷️ Service Type</h4>
-                    <h2>{current_service or 'Not Set'}</h2>
+                    <h2 style="color: #333333;">{current_service or 'Not Set'}</h2>
                 </div>
                 """, unsafe_allow_html=True)
         except Exception as e:
@@ -1083,7 +1094,7 @@ def main():
             st.markdown("""
             <div class="metric-card">
                 <h4 style="color: #667eea;">📊 Spreadsheet ID</h4>
-                <code style="font-size: 12px; word-break: break-all;">{}</code>
+                <code style="font-size: 12px; word-break: break-all; color: #333333;">{}</code>
             </div>
             """.format(SPREADSHEET_ID[:20] + "..."), unsafe_allow_html=True)
         
@@ -1091,7 +1102,7 @@ def main():
             st.markdown("""
             <div class="metric-card">
                 <h4 style="color: #764ba2;">📄 Sheet Name</h4>
-                <p style="font-size: 14px;">{}</p>
+                <p style="font-size: 14px; color: #333333;">{}</p>
             </div>
             """.format(SHEET_NAME), unsafe_allow_html=True)
         
@@ -1144,7 +1155,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("""
     <div style="text-align: center; padding: 1rem; background: linear-gradient(135deg, #e0f7ff 0%, #d6f0ff 100%); border-radius: 10px; margin: 1rem 0; border: 1px solid rgba(79, 172, 254, 0.2);">
-        <h4 style="color: #667eea; margin: 0;">📊 Quick Stats</h4>
+        <h4 style="color: #333333; margin: 0;">📊 Quick Stats</h4>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1155,7 +1166,7 @@ def main():
             
             st.sidebar.markdown(f"""
             <div style="background: linear-gradient(135deg, #e8f4ff 0%, #dceeff 100%); padding: 1rem; border-radius: 10px; border: 1px solid rgba(79, 172, 254, 0.2);">
-                <p style="margin: 5px 0;"><strong>Total Bookings:</strong> {stats['total']}</p>
+                <p style="margin: 5px 0; color: #333333;"><strong>Total Bookings:</strong> {stats['total']}</p>
                 <p style="margin: 5px 0; color: #38ef7d;"><strong>New:</strong> {stats['new']}</p>
                 <p style="margin: 5px 0; color: #00f2fe;"><strong>Reserved:</strong> {stats['reserved']}</p>
                 <p style="margin: 5px 0; color: #f5576c;"><strong>Canceled:</strong> {stats['canceled']}</p>
