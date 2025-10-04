@@ -388,7 +388,7 @@ def render_login_sidebar():
                     st.sidebar.error(f"❌ Missing required fields: {', '.join(missing_fields)}")
                     return
                 
-                with st.sidebar.spinner("🔄 Authenticating..."):
+                with st.spinner("🔄 Authenticating..."):
                     client = authenticate_google_sheets(creds_dict)
                     
                     if client:
@@ -401,7 +401,7 @@ def render_login_sidebar():
                             st.session_state.credentials = creds_dict
                             
                             st.sidebar.success("✅ Authentication successful!")
-                            st.sidebar.balloons()
+                            st.balloons()
                             st.rerun()
             
             except json.JSONDecodeError:
