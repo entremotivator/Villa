@@ -242,7 +242,20 @@ def authenticate_google_sheets(creds_dict: Dict[str, Any]) -> Optional[gspread.C
         client = gspread.authorize(creds)
         
         # Test the connection
-        _ = client.open_by_key(SPREADSHEET_ID)
+        try:
+            spreadsheet = client.open_by_key(SPREADSHEET_ID)
+            st.success(f"✅ Connected to: {spreadsheet.title}")
+        except Exception as e:
+            st.error(f"❌ Cannot access spreadsheet. Error: {str(e)}")
+            st.warning(f"""
+            **Troubleshooting Steps:**
+            1. Make sure the spreadsheet ID is correct: `{SPREADSHEET_ID}`
+            2. Share the Google Sheet with this service account email: 
+               `{creds_dict.get('client_email', 'N/A')}`
+            3. Grant 'Editor' permissions to the service account
+            4. Check that Google Sheets API and Google Drive API are enabled in your Google Cloud Project
+            """)
+            return None
         
         return client
     except Exception as e:
@@ -253,10 +266,15 @@ def get_worksheet(client: gspread.Client) -> Optional[gspread.Worksheet]:
     """Get the specific worksheet"""
     try:
         spreadsheet = client.open_by_key(SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(SHEET_NAME)
+        # Try to get the first sheet (index 0) or by name
+        try:
+            worksheet = spreadsheet.get_worksheet(0)  # Get first sheet
+        except:
+            worksheet = spreadsheet.worksheet(SHEET_NAME)
         return worksheet
     except Exception as e:
         st.error(f"❌ Error accessing worksheet: {str(e)}")
+        st.info("Please make sure you've shared the Google Sheet with your service account email.")
         return None
 
 def read_bookings(worksheet: gspread.Worksheet) -> pd.DataFrame:
@@ -265,13 +283,28 @@ def read_bookings(worksheet: gspread.Worksheet) -> pd.DataFrame:
         all_values = worksheet.get_all_values()
         
         if len(all_values) < 7:
+            st.warning("Sheet doesn't have enough rows. Expected headers at row 6 and data starting at row 7.")
             return pd.DataFrame()
         
-        headers = all_values[5]
-        data = all_values[6:]
+        # Find the header row (look for "DATE:" column)
+        header_row_idx = None
+        for idx, row in enumerate(all_values):
+            if 'DATE:' in row:
+                header_row_idx = idx
+                break
+        
+        if header_row_idx is None:
+            st.error("Could not find header row with 'DATE:' column")
+            return pd.DataFrame()
+        
+        headers = all_values[header_row_idx]
+        data = all_values[header_row_idx + 1:]
         
         df = pd.DataFrame(data, columns=headers)
-        df = df[df['DATE:'].notna() & (df['DATE:'] != '')]
+        
+        # Filter out empty rows
+        if 'DATE:' in df.columns:
+            df = df[df['DATE:'].notna() & (df['DATE:'] != '')]
         
         return df
     except Exception as e:
@@ -281,6 +314,19 @@ def read_bookings(worksheet: gspread.Worksheet) -> pd.DataFrame:
 def add_booking(worksheet: gspread.Worksheet, booking_data: Dict[str, Any]) -> bool:
     """Add a new booking to the sheet"""
     try:
+        # Find the header row first
+        all_values = worksheet.get_all_values()
+        header_row_idx = None
+        
+        for idx, row in enumerate(all_values):
+            if 'DATE:' in row:
+                header_row_idx = idx
+                break
+        
+        if header_row_idx is None:
+            st.error("Could not find header row")
+            return False
+        
         row_data = [
             booking_data['date'],
             booking_data['villa'],
