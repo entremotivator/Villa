@@ -122,20 +122,20 @@ st.markdown("""
     }
     
     .sidebar-card h4 {
-        color: #333333;
+        color: #000000;
         margin: 0 0 0.5rem 0;
         font-size: 14px;
         font-weight: 600;
     }
     
     .sidebar-card p {
-        color: #333333;
+        color: #000000;
         margin: 0;
         font-size: 13px;
     }
     
     .sidebar-card strong {
-        color: #333333;
+        color: #000000;
     }
     
     .sidebar-card a {
