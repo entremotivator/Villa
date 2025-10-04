@@ -106,6 +106,34 @@ st.markdown("""
         box-shadow: 0 8px 30px rgba(79, 172, 254, 0.25);
     }
     
+    .sidebar-card {
+        background: linear-gradient(135deg, #e8f4ff 0%, #dceeff 100%);
+        padding: 1rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(79, 172, 254, 0.15);
+        border: 1px solid rgba(79, 172, 254, 0.2);
+        margin: 0.5rem 0;
+        transition: all 0.3s ease;
+    }
+    
+    .sidebar-card:hover {
+        transform: translateX(3px);
+        box-shadow: 0 6px 20px rgba(79, 172, 254, 0.25);
+    }
+    
+    .sidebar-card h4 {
+        color: #667eea;
+        margin: 0 0 0.5rem 0;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    
+    .sidebar-card p {
+        color: #333;
+        margin: 0;
+        font-size: 13px;
+    }
+    
     .booking-card {
         background: linear-gradient(135deg, #e8f4ff 0%, #dceeff 100%);
         padding: 1.5rem;
@@ -212,8 +240,10 @@ if 'spreadsheet_url' not in st.session_state:
     st.session_state.spreadsheet_url = None
 if 'email_notifications_enabled' not in st.session_state:
     st.session_state.email_notifications_enabled = True
-if 'notification_email' not in st.session_state:
-    st.session_state.notification_email = "entremotivator@gmail.com"
+if 'available_spreadsheets' not in st.session_state:
+    st.session_state.available_spreadsheets = []
+if 'auto_loaded_sheets' not in st.session_state:
+    st.session_state.auto_loaded_sheets = False
 
 # Constants
 ORIGINAL_SPREADSHEET_ID = "1-3FLLEkUmiHzW7DGVAPI6PebdRc_24t3vM0OCBnDhco"
@@ -467,8 +497,9 @@ def render_login_sidebar():
     
     if not st.session_state.authenticated:
         st.sidebar.markdown("""
-        <div style="background: linear-gradient(135deg, #e3f2fd 0%, #d1e9f6 100%); padding: 1.5rem; border-radius: 12px;">
-            <h3 style="text-align: center; color: #333;">📁 Upload Credentials</h3>
+        <div class="sidebar-card">
+            <h4 style="text-align: center;">📁 Upload Credentials</h4>
+            <p style="text-align: center; font-size: 12px;">Upload your Google Service Account JSON</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -490,113 +521,296 @@ def render_login_sidebar():
             except Exception as e:
                 st.sidebar.error(f"Error: {str(e)}")
     else:
-        st.sidebar.success("✅ Connected")
+        st.sidebar.markdown("""
+        <div class="sidebar-card">
+            <h4>✅ Connected</h4>
+            <p>Google Sheets API Active</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.session_state.credentials:
+            email = st.session_state.credentials.get('client_email', 'N/A')
+            st.sidebar.markdown(f"""
+            <div class="sidebar-card">
+                <h4>📧 Service Account</h4>
+                <p style="font-size: 11px; word-break: break-all;">{email[:35]}...</p>
+            </div>
+            """, unsafe_allow_html=True)
         
         if st.sidebar.button("🚪 Logout", use_container_width=True):
             st.session_state.authenticated = False
             st.session_state.client = None
             st.session_state.worksheet = None
+            st.session_state.credentials = None
+            st.session_state.current_spreadsheet_id = None
+            st.session_state.available_spreadsheets = []
+            st.session_state.auto_loaded_sheets = False
             st.rerun()
 
 def render_spreadsheet_selector():
-    """Render spreadsheet management"""
+    """Render spreadsheet management with improved dropdown"""
     st.sidebar.markdown("---")
     st.sidebar.markdown("## 📊 Spreadsheet Manager")
     
     if st.session_state.authenticated and st.session_state.client:
+        
+        # Auto-load spreadsheets on first authentication
+        if not st.session_state.auto_loaded_sheets:
+            with st.spinner("Loading your spreadsheets..."):
+                spreadsheets = get_all_spreadsheets(st.session_state.client)
+                st.session_state.available_spreadsheets = spreadsheets
+                st.session_state.auto_loaded_sheets = True
+        
         # Original template link
         st.sidebar.markdown("### 📄 Original Template")
         st.sidebar.markdown(f"""
-        <div class="url-box">
-            <a href="{ORIGINAL_SPREADSHEET_URL}" target="_blank" style="color: #667eea;">
-                🔗 View Original Sheet
+        <div class="sidebar-card">
+            <a href="{ORIGINAL_SPREADSHEET_URL}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600;">
+                🔗 View Original Template
             </a>
+            <p style="margin-top: 0.5rem; font-size: 11px;">Base template for all bookings</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Clone functionality
+        # Clone functionality with improved UI
         st.sidebar.markdown("### 📋 Clone Template")
-        clone_name = st.sidebar.text_input("New spreadsheet name", placeholder="My Villa Bookings")
         
-        if st.sidebar.button("🔄 Clone & Share", use_container_width=True):
-            with st.spinner("Cloning..."):
-                result = clone_spreadsheet(
-                    st.session_state.client,
-                    ORIGINAL_SPREADSHEET_ID,
-                    clone_name if clone_name else None
-                )
-                
-                if result:
-                    st.sidebar.success(f"Cloned: {result['title']}")
-                    st.session_state.current_spreadsheet_id = result['id']
-                    st.session_state.spreadsheet_url = result['url']
-                    st.rerun()
+        with st.sidebar.form("clone_form"):
+            clone_name = st.text_input(
+                "New spreadsheet name",
+                placeholder="My Villa Bookings 2025",
+                help="Leave empty for auto-generated name"
+            )
+            
+            clone_btn = st.form_submit_button("🔄 Clone & Auto-Share", use_container_width=True)
+            
+            if clone_btn:
+                with st.spinner("Cloning and sharing..."):
+                    result = clone_spreadsheet(
+                        st.session_state.client,
+                        ORIGINAL_SPREADSHEET_ID,
+                        clone_name if clone_name else None
+                    )
+                    
+                    if result:
+                        st.success(f"✅ Created: {result['title'][:30]}...")
+                        # Refresh spreadsheet list
+                        spreadsheets = get_all_spreadsheets(st.session_state.client)
+                        st.session_state.available_spreadsheets = spreadsheets
+                        st.session_state.current_spreadsheet_id = result['id']
+                        st.session_state.spreadsheet_url = result['url']
+                        
+                        # Auto-select the new worksheet
+                        worksheet = get_worksheet(st.session_state.client, result['id'])
+                        if worksheet:
+                            st.session_state.worksheet = worksheet
+                        
+                        st.rerun()
+                    else:
+                        st.error("Failed to clone")
         
-        # Select from all spreadsheets
+        # Enhanced dropdown selector
         st.sidebar.markdown("### 📚 Your Spreadsheets")
         
-        if st.sidebar.button("🔍 Load All Spreadsheets", use_container_width=True):
-            with st.spinner("Fetching..."):
-                spreadsheets = get_all_spreadsheets(st.session_state.client)
-                st.session_state.available_spreadsheets = spreadsheets
+        # Refresh button
+        col1, col2 = st.sidebar.columns([3, 1])
+        with col1:
+            st.markdown('<div class="sidebar-card"><p>Select from all sheets in Drive</p></div>', unsafe_allow_html=True)
+        with col2:
+            if st.button("🔄", help="Refresh list"):
+                with st.spinner("Refreshing..."):
+                    spreadsheets = get_all_spreadsheets(st.session_state.client)
+                    st.session_state.available_spreadsheets = spreadsheets
+                    st.rerun()
         
-        if 'available_spreadsheets' in st.session_state:
-            if st.session_state.available_spreadsheets:
-                spreadsheet_options = {
-                    s['title']: s['id'] for s in st.session_state.available_spreadsheets
-                }
-                
-                selected_title = st.sidebar.selectbox("Select spreadsheet", list(spreadsheet_options.keys()))
-                
-                if st.sidebar.button("📂 Open Selected", use_container_width=True):
-                    selected_id = spreadsheet_options[selected_title]
-                    selected_url = next(s['url'] for s in st.session_state.available_spreadsheets if s['id'] == selected_id)
-                    
-                    worksheet = get_worksheet(st.session_state.client, selected_id)
-                    
-                    if worksheet:
-                        st.session_state.worksheet = worksheet
-                        st.session_state.current_spreadsheet_id = selected_id
-                        st.session_state.spreadsheet_url = selected_url
-                        st.sidebar.success(f"Opened: {selected_title}")
-                        st.rerun()
-        
-        # Current spreadsheet info
-        if st.session_state.spreadsheet_url:
-            st.sidebar.markdown("---")
-            st.sidebar.markdown("### <span class='live-indicator'></span> Live Sheet", unsafe_allow_html=True)
+        # Display count
+        if st.session_state.available_spreadsheets:
+            # Filter for cloned/copied spreadsheets
+            all_sheets = st.session_state.available_spreadsheets
+            cloned_sheets = [s for s in all_sheets if 'Copy of' in s['title'] or 'Villa' in s['title']]
+            
             st.sidebar.markdown(f"""
-            <div style="background: #e8f4ff; padding: 1rem; border-radius: 10px;">
-                <a href="{st.session_state.spreadsheet_url}" target="_blank" style="color: #667eea; font-weight: 600;">
-                    🔗 View Live Spreadsheet
-                </a>
+            <div class="sidebar-card">
+                <h4>📊 Sheet Statistics</h4>
+                <p>Total sheets: <strong>{len(all_sheets)}</strong></p>
+                <p>Cloned sheets: <strong>{len(cloned_sheets)}</strong></p>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Tabs for filtering
+            sheet_filter = st.sidebar.radio(
+                "Filter by:",
+                ["🌟 All Sheets", "📋 Cloned Sheets Only", "🔍 Search"],
+                label_visibility="collapsed"
+            )
+            
+            # Determine which sheets to show
+            if sheet_filter == "📋 Cloned Sheets Only":
+                display_sheets = cloned_sheets
+            elif sheet_filter == "🔍 Search":
+                search_term = st.sidebar.text_input("🔍 Search sheets", "")
+                if search_term:
+                    display_sheets = [s for s in all_sheets if search_term.lower() in s['title'].lower()]
+                else:
+                    display_sheets = all_sheets
+            else:
+                display_sheets = all_sheets
+            
+            if display_sheets:
+                # Create dropdown options
+                spreadsheet_options = {
+                    f"📄 {s['title'][:50]}{'...' if len(s['title']) > 50 else ''}": s['id'] 
+                    for s in display_sheets
+                }
+                
+                # Find current selection
+                current_selection = None
+                if st.session_state.current_spreadsheet_id:
+                    for title, sheet_id in spreadsheet_options.items():
+                        if sheet_id == st.session_state.current_spreadsheet_id:
+                            current_selection = title
+                            break
+                
+                selected_title = st.sidebar.selectbox(
+                    f"Select spreadsheet ({len(display_sheets)} available)",
+                    options=list(spreadsheet_options.keys()),
+                    index=list(spreadsheet_options.keys()).index(current_selection) if current_selection else 0
+                )
+                
+                if st.sidebar.button("📂 Open Selected Sheet", use_container_width=True):
+                    selected_id = spreadsheet_options[selected_title]
+                    selected_sheet = next(s for s in display_sheets if s['id'] == selected_id)
+                    
+                    with st.spinner("Opening spreadsheet..."):
+                        worksheet = get_worksheet(st.session_state.client, selected_id)
+                        
+                        if worksheet:
+                            st.session_state.worksheet = worksheet
+                            st.session_state.current_spreadsheet_id = selected_id
+                            st.session_state.spreadsheet_url = selected_sheet['url']
+                            st.sidebar.success(f"✅ Opened: {selected_sheet['title'][:30]}...")
+                            st.rerun()
+                        else:
+                            st.sidebar.error("Failed to open sheet")
+            else:
+                st.sidebar.info("No sheets found matching criteria")
+        else:
+            st.sidebar.markdown("""
+            <div class="sidebar-card">
+                <h4>⚠️ No Sheets Loaded</h4>
+                <p>Click the refresh button above to load your sheets</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Current spreadsheet info with enhanced styling
+        if st.session_state.current_spreadsheet_id and st.session_state.spreadsheet_url:
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("### <span class='live-indicator'></span> Active Sheet", unsafe_allow_html=True)
+            
+            # Get current sheet name
+            current_sheet_name = "Unknown"
+            if st.session_state.available_spreadsheets:
+                for sheet in st.session_state.available_spreadsheets:
+                    if sheet['id'] == st.session_state.current_spreadsheet_id:
+                        current_sheet_name = sheet['title']
+                        break
+            
+            st.sidebar.markdown(f"""
+            <div class="sidebar-card">
+                <h4>📊 {current_sheet_name[:30]}{'...' if len(current_sheet_name) > 30 else ''}</h4>
+                <a href="{st.session_state.spreadsheet_url}" target="_blank" style="color: #667eea; font-weight: 600; text-decoration: none;">
+                    🔗 View Live Spreadsheet →
+                </a>
+                <p style="margin-top: 0.5rem; font-size: 11px; color: #666;">Opens in new tab</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Quick actions
+            st.sidebar.markdown("""
+            <div class="sidebar-card">
+                <h4>⚡ Quick Actions</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                if st.button("📋 Copy URL", use_container_width=True):
+                    st.sidebar.code(st.session_state.spreadsheet_url, language="text")
+            with col2:
+                if st.button("🔄 Reload", use_container_width=True):
+                    st.rerun()
 
 def render_activity_log_sidebar():
-    """Render activity log"""
+    """Render activity log with enhanced styling"""
     st.sidebar.markdown("---")
-    st.sidebar.markdown("## 📋 Activity Log")
+    st.sidebar.markdown("## 📋 Activity & Notifications")
     
-    # Email notifications toggle
+    # Email notifications toggle with card styling
+    st.sidebar.markdown("""
+    <div class="sidebar-card">
+        <h4>📧 Email Notifications</h4>
+        <p style="font-size: 11px;">Auto-notify: entremotivator@gmail.com</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.session_state.email_notifications_enabled = st.sidebar.checkbox(
-        "📧 Enable Email Notifications",
+        "Enable Email Alerts",
         value=st.session_state.email_notifications_enabled,
-        help=f"Send notifications to {NOTIFICATION_EMAIL}"
+        help="Send notifications for all booking activities"
     )
     
-    # Display logs
-    if st.sidebar.button("🔄 Refresh Log", use_container_width=True):
-        st.rerun()
+    # Activity log stats
+    log_count_total = len(st.session_state.activity_log)
+    log_success = len([l for l in st.session_state.activity_log if l['type'] == 'success'])
+    log_errors = len([l for l in st.session_state.activity_log if l['type'] == 'error'])
     
-    log_count = st.sidebar.slider("Show last N entries", 5, 50, 10)
+    st.sidebar.markdown(f"""
+    <div class="sidebar-card">
+        <h4>📊 Activity Statistics</h4>
+        <p>Total Events: <strong style="color: #667eea;">{log_count_total}</strong></p>
+        <p>✅ Success: <strong style="color: #38ef7d;">{log_success}</strong></p>
+        <p>❌ Errors: <strong style="color: #f5576c;">{log_errors}</strong></p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    for log in st.session_state.activity_log[:log_count]:
-        log_class = f"log-entry log-entry-{log['type']}"
-        st.sidebar.markdown(f"""
-        <div class="{log_class}">
-            <strong>{log['timestamp']}</strong><br>
-            {log['message']}
+    # Log display controls
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.button("🔄 Refresh", use_container_width=True, key="refresh_log"):
+            st.rerun()
+    with col2:
+        if st.button("🗑️ Clear", use_container_width=True, key="clear_log"):
+            st.session_state.activity_log = []
+            st.rerun()
+    
+    log_count = st.sidebar.slider("Show entries", 5, 50, 15, key="log_slider")
+    
+    # Display logs with enhanced styling
+    st.sidebar.markdown("### Recent Activity")
+    
+    if st.session_state.activity_log:
+        for log in st.session_state.activity_log[:log_count]:
+            log_class = f"log-entry log-entry-{log['type']}"
+            
+            # Icon based on type
+            icon = "ℹ️"
+            if log['type'] == 'success':
+                icon = "✅"
+            elif log['type'] == 'error':
+                icon = "❌"
+            elif log['type'] == 'info':
+                icon = "📌"
+            
+            st.sidebar.markdown(f"""
+            <div class="{log_class}">
+                <strong style="font-size: 11px;">{icon} {log['timestamp']}</strong><br>
+                <span style="font-size: 12px;">{log['message']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.sidebar.markdown("""
+        <div class="sidebar-card">
+            <p style="text-align: center; color: #666;">No activity yet</p>
         </div>
         """, unsafe_allow_html=True)
 
