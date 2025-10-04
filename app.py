@@ -116,38 +116,41 @@ st.markdown("""
     }
     
     .metric-card {
-        background: white;
+        background: linear-gradient(135deg, #e0f7ff 0%, #d6f0ff 100%);
         padding: 1.5rem;
         border-radius: 15px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        box-shadow: 0 4px 20px rgba(79, 172, 254, 0.15);
         transition: all 0.3s ease;
+        border: 1px solid rgba(79, 172, 254, 0.2);
     }
     
     .metric-card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        box-shadow: 0 8px 30px rgba(79, 172, 254, 0.25);
     }
     
     .booking-card {
-        background: white;
+        background: linear-gradient(135deg, #e8f4ff 0%, #dceeff 100%);
         padding: 1.5rem;
         border-radius: 15px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        box-shadow: 0 4px 20px rgba(79, 172, 254, 0.15);
         margin-bottom: 1rem;
         border-left: 5px solid #667eea;
         transition: all 0.3s ease;
+        border: 1px solid rgba(79, 172, 254, 0.2);
     }
     
     .booking-card:hover {
         transform: translateX(5px);
-        box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        box-shadow: 0 8px 30px rgba(79, 172, 254, 0.25);
     }
     
     .login-container {
-        background: white;
+        background: linear-gradient(135deg, #e3f2fd 0%, #d1e9f6 100%);
         padding: 2rem;
         border-radius: 15px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 20px rgba(79, 172, 254, 0.2);
+        border: 1px solid rgba(79, 172, 254, 0.3);
     }
     
     .success-message {
@@ -1140,7 +1143,7 @@ def main():
     # Footer
     st.sidebar.markdown("---")
     st.sidebar.markdown("""
-    <div style="text-align: center; padding: 1rem; background: white; border-radius: 10px; margin: 1rem 0;">
+    <div style="text-align: center; padding: 1rem; background: linear-gradient(135deg, #e0f7ff 0%, #d6f0ff 100%); border-radius: 10px; margin: 1rem 0; border: 1px solid rgba(79, 172, 254, 0.2);">
         <h4 style="color: #667eea; margin: 0;">📊 Quick Stats</h4>
     </div>
     """, unsafe_allow_html=True)
@@ -1151,7 +1154,7 @@ def main():
             stats = get_booking_statistics(df)
             
             st.sidebar.markdown(f"""
-            <div style="background: white; padding: 1rem; border-radius: 10px;">
+            <div style="background: linear-gradient(135deg, #e8f4ff 0%, #dceeff 100%); padding: 1rem; border-radius: 10px; border: 1px solid rgba(79, 172, 254, 0.2);">
                 <p style="margin: 5px 0;"><strong>Total Bookings:</strong> {stats['total']}</p>
                 <p style="margin: 5px 0; color: #38ef7d;"><strong>New:</strong> {stats['new']}</p>
                 <p style="margin: 5px 0; color: #00f2fe;"><strong>Reserved:</strong> {stats['reserved']}</p>
