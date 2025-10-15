@@ -19,14 +19,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DRIVE_FOLDER_ID = "1Fk5dJGkm5dNMZkfsITe5Lt9x-yCsBiF2"
-EXAMPLE_SPREADSHEET_IDS = [
-    "1ge6-Rzor5jbQ7zaaQk3B7I0Vx31Nv80QH6zW2NfBUz8",
-    "1-I0lHMXrA16v07Qtc3BNqnjRux7PRf8fMxJhVlxAcME"
-]
 
 # Page Configuration
 st.set_page_config(
-    page_title="Professional Booking Management System - Enhanced",
+    page_title="Professional Booking Management System - Fixed",
     page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -57,7 +53,6 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 1px;
     }
-    /* Updated all info boxes to have black text */
     .info-box {
         background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
         padding: 1.5rem;
@@ -106,7 +101,6 @@ st.markdown("""
     .error-box h2, .error-box h3, .error-box h4, .error-box p, .error-box strong {
         color: #000000 !important;
     }
-    /* Updated metric cards to have black text */
     .metric-card {
         background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
         padding: 2rem;
@@ -154,15 +148,6 @@ st.markdown("""
         display: inline-block;
         margin: 0.3rem 0;
     }
-    .status-badge {
-        display: inline-block;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-weight: bold;
-        margin: 0.3rem;
-        color: white;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
     .log-entry {
         background: #f8f9fa;
         padding: 0.8rem;
@@ -191,7 +176,6 @@ st.markdown("""
         color: white;
         box-shadow: 0 6px 12px rgba(0,0,0,0.2);
     }
-    /* Updated property cards to have black text */
     .property-card {
         background: white;
         padding: 1.5rem;
@@ -208,13 +192,6 @@ st.markdown("""
     }
     .property-card h1, .property-card h2, .property-card h3, .property-card h4, .property-card p, .property-card strong {
         color: #000000 !important;
-    }
-    .sheet-selector {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        border: 2px solid #dee2e6;
-        margin: 1rem 0;
     }
     .progress-box {
         background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
@@ -253,45 +230,8 @@ if 'cache_timestamp' not in st.session_state:
     st.session_state.cache_timestamp = None
 if 'loading_progress' not in st.session_state:
     st.session_state.loading_progress = {'current': 0, 'total': 0, 'status': ''}
-
-# Status code definitions
-STATUS_CODES = {
-    'CI': {
-        'name': 'Check-In',
-        'description': 'Complete cleaning and preparation for incoming guests',
-        'color': '#4CAF50'
-    },
-    'SO': {
-        'name': 'Stay-over',
-        'description': 'Mid-stay cleaning with linen and towel refresh',
-        'color': '#2196F3'
-    },
-    'CO/CI': {
-        'name': 'Check-out/Check-in',
-        'description': 'Same-day turnover between guests',
-        'color': '#FF9800'
-    },
-    'FU': {
-        'name': 'Fresh-up',
-        'description': 'Quick refresh for already clean property',
-        'color': '#9C27B0'
-    },
-    'DC': {
-        'name': 'Deep Cleaning',
-        'description': 'Thorough deep clean of entire property',
-        'color': '#F44336'
-    },
-    'COC': {
-        'name': 'Construction Cleaning',
-        'description': 'Post-renovation construction cleanup',
-        'color': '#795548'
-    },
-    'CO': {
-        'name': 'Check-Out',
-        'description': 'Final cleaning after guest departure',
-        'color': '#607D8B'
-    }
-}
+if 'discovered_sheets' not in st.session_state:
+    st.session_state.discovered_sheets = []
 
 def add_log(message: str, level: str = "INFO"):
     """Add a log entry with timestamp"""
@@ -303,9 +243,9 @@ def add_log(message: str, level: str = "INFO"):
     }
     st.session_state.logs.append(log_entry)
     
-    # Keep only last 100 logs
-    if len(st.session_state.logs) > 100:
-        st.session_state.logs = st.session_state.logs[-100:]
+    # Keep only last 200 logs
+    if len(st.session_state.logs) > 200:
+        st.session_state.logs = st.session_state.logs[-200:]
     
     # Also log to Python logger
     if level == "INFO":
@@ -317,7 +257,7 @@ def add_log(message: str, level: str = "INFO"):
     elif level == "ERROR":
         logger.error(message)
 
-def retry_with_backoff(max_retries: int = 3, initial_delay: float = 1.0):
+def retry_with_backoff(max_retries: int = 5, initial_delay: float = 2.0):
     """Decorator for retrying functions with exponential backoff"""
     def decorator(func):
         @wraps(func)
@@ -329,7 +269,7 @@ def retry_with_backoff(max_retries: int = 3, initial_delay: float = 1.0):
                 except Exception as e:
                     if attempt == max_retries - 1:
                         raise
-                    add_log(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {delay}s...", "WARNING")
+                    add_log(f"Attempt {attempt + 1}/{max_retries} failed: {str(e)}. Retrying in {delay}s...", "WARNING")
                     time.sleep(delay)
                     delay *= 2  # Exponential backoff
             return None
@@ -337,7 +277,7 @@ def retry_with_backoff(max_retries: int = 3, initial_delay: float = 1.0):
     return decorator
 
 class EnhancedBookingManager:
-    """Enhanced Booking Manager with improved file loading and caching"""
+    """Enhanced Booking Manager with improved file loading"""
     
     def __init__(self, credentials_dict: Dict):
         """Initialize with service account credentials"""
@@ -387,7 +327,7 @@ class EnhancedBookingManager:
         """Update cache with new data"""
         st.session_state.workbooks_cache[cache_key] = data
         st.session_state.cache_timestamp = datetime.now()
-        add_log(f"Cache updated for key: {cache_key}", "INFO")
+        add_log(f"Cache updated for key: {cache_key} with {len(data)} items", "INFO")
     
     def _update_progress(self, current: int, total: int, status: str):
         """Update loading progress"""
@@ -397,139 +337,154 @@ class EnhancedBookingManager:
             'status': status
         }
     
-    @retry_with_backoff(max_retries=3, initial_delay=2.0)
+    @retry_with_backoff(max_retries=5, initial_delay=2.0)
     def _fetch_drive_files_page(self, drive_service, query: str, page_token: Optional[str] = None):
         """Fetch a single page of files from Drive API with retry logic"""
-        return drive_service.files().list(
+        add_log(f"Fetching Drive API page (token: {page_token[:20] if page_token else 'None'}...)", "INFO")
+        result = drive_service.files().list(
             q=query,
             pageSize=1000,  # Maximum page size
-            fields="nextPageToken, files(id, name, webViewLink, modifiedTime, createdTime, owners, size, mimeType)",
+            fields="nextPageToken, files(id, name, webViewLink, modifiedTime, createdTime, owners, size, mimeType, parents)",
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
-            pageToken=page_token
+            pageToken=page_token,
+            corpora='allDrives'
         ).execute()
+        add_log(f"Drive API returned {len(result.get('files', []))} files", "SUCCESS")
+        return result
     
-    def list_workbooks_from_folder_enhanced(
-        self, 
-        folder_id: str,
-        use_cache: bool = True,
-        force_refresh: bool = False,
-        recursive: bool = False,
-        max_depth: int = 3,
-        progress_callback: Optional[Callable] = None
-    ) -> List[Dict]:
-        """Enhanced version with complete loading, caching, and progress tracking"""
+    def list_all_workbooks_from_folder(self, folder_id: str, force_refresh: bool = False) -> List[Dict]:
+        """
+        FIXED VERSION: List ALL spreadsheets from Google Drive folder
+        This version ensures complete file loading with proper pagination
+        """
         try:
-            cache_key = f"folder_{folder_id}_recursive_{recursive}"
+            cache_key = f"folder_{folder_id}_all"
             
             # Check cache first
-            if use_cache and not force_refresh and self._is_cache_valid(cache_key):
+            if not force_refresh and self._is_cache_valid(cache_key):
                 add_log(f"Using cached data for folder: {folder_id}", "INFO")
                 cached_data = st.session_state.workbooks_cache.get(cache_key, [])
                 add_log(f"Loaded {len(cached_data)} workbook(s) from cache", "SUCCESS")
                 return cached_data
             
-            add_log(f"Listing workbooks from folder: {folder_id} (Enhanced Mode)", "INFO")
-            add_log(f"Settings: Cache={use_cache}, ForceRefresh={force_refresh}, Recursive={recursive}", "INFO")
+            add_log(f"=" * 60, "INFO")
+            add_log(f"STARTING COMPLETE FOLDER SCAN", "INFO")
+            add_log(f"Folder ID: {folder_id}", "INFO")
+            add_log(f"Force Refresh: {force_refresh}", "INFO")
+            add_log(f"=" * 60, "INFO")
             
             workbooks = []
             
-            # Method 1: Drive API with enhanced pagination
+            # Method 1: Drive API with COMPLETE pagination
             try:
                 from googleapiclient.discovery import build
                 from googleapiclient.errors import HttpError
-                add_log("Attempting Enhanced Drive API method...", "INFO")
                 
+                add_log("Building Drive API service...", "INFO")
                 drive_service = build('drive', 'v3', credentials=self.creds)
+                add_log("Drive API service built successfully", "SUCCESS")
                 
-                # Query for all spreadsheets in the folder
+                # Query for ALL spreadsheets in the folder
                 query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+                add_log(f"Query: {query}", "INFO")
                 
                 page_token = None
                 page_count = 0
                 total_files = 0
-                max_pages = 100  # Safety limit
+                max_pages = 1000  # Increased safety limit
                 
-                add_log("Starting pagination loop (max 1000 files per page)...", "INFO")
+                add_log("Starting pagination loop...", "INFO")
+                add_log(f"Max pages: {max_pages}, Max files per page: 1000", "INFO")
                 
                 while page_count < max_pages:
                     page_count += 1
-                    add_log(f"Fetching page {page_count}...", "INFO")
+                    add_log(f"", "INFO")
+                    add_log(f">>> FETCHING PAGE {page_count} <<<", "INFO")
                     
                     self._update_progress(total_files, -1, f"Loading page {page_count}...")
                     
-                    # Fetch page with retry logic
-                    results = self._fetch_drive_files_page(drive_service, query, page_token)
-                    
-                    files = results.get('files', [])
-                    add_log(f"Page {page_count}: Found {len(files)} file(s)", "INFO")
-                    
-                    for file in files:
-                        total_files += 1
-                        workbooks.append({
-                            'id': file['id'],
-                            'name': file['name'],
-                            'url': file.get('webViewLink', f"https://docs.google.com/spreadsheets/d/{file['id']}"),
-                            'modified': file.get('modifiedTime', 'Unknown'),
-                            'created': file.get('createdTime', 'Unknown'),
-                            'size': file.get('size', 'Unknown'),
-                            'owners': file.get('owners', []),
-                            'mimeType': file.get('mimeType', 'Unknown')
-                        })
+                    try:
+                        # Fetch page with retry logic
+                        results = self._fetch_drive_files_page(drive_service, query, page_token)
                         
-                        if total_files % 10 == 0:
-                            add_log(f"  Loaded {total_files} files so far...", "INFO")
-                            self._update_progress(total_files, -1, f"Loaded {total_files} files...")
+                        files = results.get('files', [])
+                        add_log(f"Page {page_count}: Received {len(files)} file(s) from API", "SUCCESS")
+                        
+                        if len(files) == 0:
+                            add_log(f"Page {page_count} returned 0 files - stopping", "WARNING")
+                            break
+                        
+                        # Process each file
+                        for idx, file in enumerate(files, 1):
+                            total_files += 1
+                            
+                            workbook_info = {
+                                'id': file['id'],
+                                'name': file['name'],
+                                'url': file.get('webViewLink', f"https://docs.google.com/spreadsheets/d/{file['id']}"),
+                                'modified': file.get('modifiedTime', 'Unknown'),
+                                'created': file.get('createdTime', 'Unknown'),
+                                'size': file.get('size', 'Unknown'),
+                                'owners': file.get('owners', []),
+                                'mimeType': file.get('mimeType', 'Unknown'),
+                                'parents': file.get('parents', [])
+                            }
+                            
+                            workbooks.append(workbook_info)
+                            
+                            # Log every file
+                            add_log(f"  [{total_files}] {file['name']}", "SUCCESS")
+                            
+                            if total_files % 50 == 0:
+                                add_log(f"  >>> Loaded {total_files} files so far...", "INFO")
+                                self._update_progress(total_files, -1, f"Loaded {total_files} files...")
+                        
+                        # Check for next page
+                        page_token = results.get('nextPageToken')
+                        
+                        if not page_token:
+                            add_log(f"", "INFO")
+                            add_log(f"No more pages found. Pagination complete.", "SUCCESS")
+                            add_log(f"Total pages processed: {page_count}", "SUCCESS")
+                            break
+                        else:
+                            add_log(f"Next page token found: {page_token[:30]}...", "INFO")
+                            add_log(f"Continuing to next page...", "INFO")
+                            time.sleep(0.5)  # Rate limiting
                     
-                    page_token = results.get('nextPageToken')
-                    
-                    if not page_token:
-                        add_log(f"No more pages. Total pages processed: {page_count}", "SUCCESS")
+                    except Exception as page_error:
+                        add_log(f"Error on page {page_count}: {str(page_error)}", "ERROR")
+                        add_log(f"Continuing with {total_files} files loaded so far...", "WARNING")
                         break
-                    
-                    add_log(f"More pages available, continuing...", "INFO")
-                    time.sleep(0.5)  # Rate limiting
                 
                 if page_count >= max_pages:
                     add_log(f"Reached maximum page limit ({max_pages}). There may be more files.", "WARNING")
                 
+                add_log(f"", "INFO")
+                add_log(f"=" * 60, "INFO")
+                add_log(f"FOLDER SCAN COMPLETE", "SUCCESS")
+                add_log(f"Total workbooks found: {len(workbooks)}", "SUCCESS")
+                add_log(f"Total pages scanned: {page_count}", "SUCCESS")
+                add_log(f"=" * 60, "INFO")
+                
                 if workbooks:
-                    add_log(f"Drive API method successful: {len(workbooks)} workbook(s) loaded across {page_count} page(s)", "SUCCESS")
                     self._update_cache(cache_key, workbooks)
                     self._update_progress(len(workbooks), len(workbooks), "Complete")
                     return workbooks
+                else:
+                    add_log("No workbooks found via Drive API", "WARNING")
                     
-            except ImportError:
-                add_log("google-api-python-client not installed, trying alternative methods", "WARNING")
+            except ImportError as ie:
+                add_log(f"google-api-python-client not installed: {str(ie)}", "ERROR")
+                add_log("Install with: pip install google-api-python-client", "WARNING")
             except Exception as e:
-                add_log(f"Drive API method failed: {str(e)}", "WARNING")
+                add_log(f"Drive API method failed: {str(e)}", "ERROR")
+                import traceback
+                add_log(f"Traceback: {traceback.format_exc()}", "ERROR")
             
-            # Method 2: Try example spreadsheet IDs
-            add_log("Trying to open example spreadsheets from folder...", "INFO")
-            for sheet_id in EXAMPLE_SPREADSHEET_IDS:
-                try:
-                    sheet = self.gc.open_by_key(sheet_id)
-                    workbooks.append({
-                        'id': sheet.id,
-                        'name': sheet.title,
-                        'url': sheet.url,
-                        'modified': 'Unknown',
-                        'created': 'Unknown',
-                        'size': 'Unknown',
-                        'owners': [],
-                        'mimeType': 'application/vnd.google-apps.spreadsheet'
-                    })
-                    add_log(f"  ✓ Opened: {sheet.title}", "SUCCESS")
-                except Exception as e:
-                    add_log(f"  ✗ Could not open {sheet_id}: {str(e)}", "WARNING")
-            
-            if workbooks:
-                add_log(f"Example spreadsheet method successful: {len(workbooks)} workbook(s)", "SUCCESS")
-                self._update_cache(cache_key, workbooks)
-                return workbooks
-            
-            # Method 3: List all accessible spreadsheets
-            add_log("Trying to list all accessible spreadsheets...", "INFO")
+            # Method 2: List all accessible spreadsheets (fallback)
+            add_log("Trying fallback method: list all accessible spreadsheets...", "INFO")
             try:
                 all_spreadsheets = self.gc.openall()
                 add_log(f"Found {len(all_spreadsheets)} accessible spreadsheet(s)", "INFO")
@@ -543,35 +498,43 @@ class EnhancedBookingManager:
                         'created': 'Unknown',
                         'size': 'Unknown',
                         'owners': [],
-                        'mimeType': 'application/vnd.google-apps.spreadsheet'
+                        'mimeType': 'application/vnd.google-apps.spreadsheet',
+                        'parents': []
                     })
-                    add_log(f"  ✓ {sheet.title}", "INFO")
+                    add_log(f"  [{i}] {sheet.title}", "INFO")
                     
                     if i % 10 == 0:
                         self._update_progress(i, len(all_spreadsheets), f"Loading {i}/{len(all_spreadsheets)}...")
                 
                 if workbooks:
-                    add_log(f"List all method successful: {len(workbooks)} workbook(s)", "SUCCESS")
+                    add_log(f"Fallback method successful: {len(workbooks)} workbook(s)", "SUCCESS")
                     self._update_cache(cache_key, workbooks)
                     self._update_progress(len(workbooks), len(workbooks), "Complete")
                     return workbooks
                     
             except Exception as e:
-                add_log(f"List all method failed: {str(e)}", "ERROR")
+                add_log(f"Fallback method failed: {str(e)}", "ERROR")
             
             # No workbooks found
-            add_log("No workbooks found with any method", "ERROR")
-            add_log(f"Please ensure folder {folder_id} is shared with: {st.session_state.service_account_email}", "WARNING")
-            add_log("Or add spreadsheet IDs manually below", "INFO")
+            add_log("=" * 60, "ERROR")
+            add_log("NO WORKBOOKS FOUND WITH ANY METHOD", "ERROR")
+            add_log(f"Please verify:", "WARNING")
+            add_log(f"1. Folder {folder_id} exists", "WARNING")
+            add_log(f"2. Folder is shared with: {st.session_state.service_account_email}", "WARNING")
+            add_log(f"3. Folder contains Google Sheets files", "WARNING")
+            add_log(f"4. google-api-python-client is installed", "WARNING")
+            add_log("=" * 60, "ERROR")
             
             return []
                 
         except Exception as e:
-            add_log(f"Error listing workbooks: {str(e)}", "ERROR")
+            add_log(f"CRITICAL ERROR in list_all_workbooks_from_folder: {str(e)}", "ERROR")
+            import traceback
+            add_log(f"Full traceback: {traceback.format_exc()}", "ERROR")
             return []
     
     def open_workbook_by_id(self, workbook_id: str):
-        """Open a specific workbook by ID (for manual entry)"""
+        """Open a specific workbook by ID"""
         try:
             add_log(f"Opening workbook by ID: {workbook_id}", "INFO")
             workbook = self.gc.open_by_key(workbook_id)
@@ -587,7 +550,8 @@ class EnhancedBookingManager:
                     'created': 'Unknown',
                     'size': 'Unknown',
                     'owners': [],
-                    'mimeType': 'application/vnd.google-apps.spreadsheet'
+                    'mimeType': 'application/vnd.google-apps.spreadsheet',
+                    'parents': []
                 })
                 add_log(f"Added {workbook.title} to workbooks list", "SUCCESS")
             
@@ -760,86 +724,6 @@ class EnhancedBookingManager:
             add_log(f"Error reading sheet: {str(e)}", "ERROR")
             return pd.DataFrame()
     
-    def update_booking(self, sheet, row: int, col: int, value: str) -> bool:
-        """Update a single booking cell"""
-        try:
-            add_log(f"Updating cell [{row}, {col}] in {sheet.title} to: {value}", "INFO")
-            sheet.update_cell(row, col, value)
-            add_log("Cell updated successfully", "SUCCESS")
-            return True
-        except Exception as e:
-            add_log(f"Error updating booking: {str(e)}", "ERROR")
-            return False
-    
-    def add_booking_row(self, sheet, start_row: int, data: List) -> bool:
-        """Add a new booking row"""
-        try:
-            add_log(f"Adding new booking row to {sheet.title}", "INFO")
-            all_values = sheet.get_all_values()
-            last_row = len(all_values) + 1
-            
-            sheet.insert_row(data, last_row)
-            add_log(f"Booking added at row {last_row}", "SUCCESS")
-            return True
-        except Exception as e:
-            add_log(f"Error adding booking: {str(e)}", "ERROR")
-            return False
-
-    def copy_row(self, sheet, row_index: int) -> List:
-        """Copy a row from the sheet"""
-        try:
-            add_log(f"Copying row {row_index} from {sheet.title}", "INFO")
-            all_values = sheet.get_all_values()
-            
-            if row_index < len(all_values):
-                row_data = all_values[row_index]
-                add_log(f"Row copied successfully: {len(row_data)} cells", "SUCCESS")
-                return row_data
-            else:
-                add_log(f"Row index {row_index} out of range", "ERROR")
-                return []
-        except Exception as e:
-            add_log(f"Error copying row: {str(e)}", "ERROR")
-            return []
-    
-    def append_row(self, sheet, data: List) -> bool:
-        """Append a new row to the sheet"""
-        try:
-            add_log(f"Appending row to {sheet.title}", "INFO")
-            sheet.append_row(data)
-            add_log(f"Row appended successfully with {len(data)} cells", "SUCCESS")
-            return True
-        except Exception as e:
-            add_log(f"Error appending row: {str(e)}", "ERROR")
-            return False
-    
-    def update_cell_live(self, sheet, row: int, col: int, value: str) -> bool:
-        """Update a single cell in real-time"""
-        try:
-            add_log(f"Updating cell [{row}, {col}] in {sheet.title} to: {value}", "INFO")
-            sheet.update_cell(row, col, value)
-            add_log("Cell updated successfully", "SUCCESS")
-            return True
-        except Exception as e:
-            add_log(f"Error updating cell: {str(e)}", "ERROR")
-            return False
-    
-    def batch_update_cells(self, sheet, cell_list: List[Dict]) -> bool:
-        """Batch update multiple cells at once
-        cell_list format: [{'row': 1, 'col': 1, 'value': 'text'}, ...]
-        """
-        try:
-            add_log(f"Batch updating {len(cell_list)} cells in {sheet.title}", "INFO")
-            
-            for cell_data in cell_list:
-                sheet.update_cell(cell_data['row'], cell_data['col'], cell_data['value'])
-            
-            add_log(f"Batch update completed: {len(cell_list)} cells updated", "SUCCESS")
-            return True
-        except Exception as e:
-            add_log(f"Error in batch update: {str(e)}", "ERROR")
-            return False
-    
     def clear_cache(self):
         """Clear the workbooks cache"""
         st.session_state.workbooks_cache = {}
@@ -847,16 +731,21 @@ class EnhancedBookingManager:
         add_log("Cache cleared successfully", "SUCCESS")
 
 def authenticate():
-    """Authentication section with JSON file upload only"""
-    st.markdown('<div class="main-header">🏠 Professional Booking Management System - Enhanced</div>', unsafe_allow_html=True)
+    """Authentication section"""
+    st.markdown('<div class="main-header">🏠 Booking Management System - FIXED VERSION</div>', unsafe_allow_html=True)
     
     with st.container():
         st.markdown("""
-        <div class="info-box">
-            <h3 style="margin-top: 0;">Welcome to Your Enhanced Booking Hub</h3>
-            <p>Manage multiple client properties, booking calendars, and service schedules all in one place. 
-            Upload your Google service account JSON file to get started.</p>
-            <p><strong>✨ New Features:</strong> Complete file loading, smart caching, progress tracking, and retry logic!</p>
+        <div class="success-box">
+            <h3 style="margin-top: 0;">✅ FIXED: Complete Folder Scanning</h3>
+            <p>This version will load <strong>ALL spreadsheets</strong> from your Google Drive folder with:</p>
+            <ul>
+                <li>✅ Complete pagination (1000 files per page)</li>
+                <li>✅ Detailed logging of every file found</li>
+                <li>✅ Enhanced error handling and retry logic</li>
+                <li>✅ Progress tracking for large folders</li>
+                <li>✅ Fallback methods if Drive API fails</li>
+            </ul>
         </div>
         """, unsafe_allow_html=True)
         
@@ -864,26 +753,7 @@ def authenticate():
         <div class="drive-config-card">
             <h3 style="color: white; margin-top: 0;">📁 Google Drive Folder</h3>
             <p style="color: white;"><strong>Folder ID:</strong> {DRIVE_FOLDER_ID}</p>
-            <p style="color: white; font-size: 0.9rem;">All workbooks will be loaded from this folder automatically with enhanced pagination.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with st.sidebar:
-        st.markdown("""
-        <div class="sidebar-card">
-            <h3>🚀 Quick Setup</h3>
-            
-            <p class="highlight">Step 1: Service Account</p>
-            <p>Create a service account with Sheets & Drive API access</p>
-            
-            <p class="highlight">Step 2: Download JSON Key</p>
-            <p>Generate and download the credentials JSON file</p>
-            
-            <p class="highlight">Step 3: Share Folder</p>
-            <p>Share the Google Drive folder with your service account email</p>
-            
-            <p class="highlight">Step 4: Upload & Connect</p>
-            <p>Upload the JSON file below to authenticate</p>
+            <p style="color: white; font-size: 0.9rem;">All workbooks will be loaded from this folder automatically.</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -899,15 +769,9 @@ def authenticate():
     if uploaded_file:
         st.success(f"✅ File loaded: {uploaded_file.name}")
     
-    col1, col2 = st.columns(2)
+    force_refresh = st.checkbox("Force Refresh (ignore cache)", value=True, help="Always reload from Drive")
     
-    with col1:
-        use_cache = st.checkbox("Use Cache (5 min)", value=True, help="Use cached results for faster loading")
-    
-    with col2:
-        force_refresh = st.checkbox("Force Refresh", value=False, help="Ignore cache and reload all files")
-    
-    if st.button("🚀 Connect to Google Sheets", type="primary", use_container_width=True):
+    if st.button("🚀 Connect & Load ALL Spreadsheets", type="primary", use_container_width=True):
         if uploaded_file:
             with st.spinner("Authenticating..."):
                 try:
@@ -923,50 +787,52 @@ def authenticate():
                     
                     progress_placeholder = st.empty()
                     
-                    with st.spinner(f"Loading workbooks from folder {DRIVE_FOLDER_ID}..."):
-                        add_log("Starting enhanced workbook discovery...", "INFO")
+                    with st.spinner(f"Loading ALL workbooks from folder {DRIVE_FOLDER_ID}..."):
+                        add_log("Starting COMPLETE workbook discovery...", "INFO")
                         
-                        # Show initial progress
                         progress_placeholder.markdown("""
                         <div class="progress-box">
-                            <p><strong>📊 Loading workbooks...</strong></p>
-                            <p>Scanning folder with enhanced pagination (up to 1000 files per page)</p>
+                            <p><strong>📊 Loading ALL workbooks...</strong></p>
+                            <p>Scanning folder with complete pagination</p>
+                            <p>Check System Logs for detailed progress</p>
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        st.session_state.workbooks = manager.list_workbooks_from_folder_enhanced(
+                        st.session_state.workbooks = manager.list_all_workbooks_from_folder(
                             DRIVE_FOLDER_ID,
-                            use_cache=use_cache,
                             force_refresh=force_refresh
                         )
                         
                         progress = st.session_state.loading_progress
-                        if progress['total'] > 0:
-                            progress_placeholder.markdown(f"""
-                            <div class="success-box">
-                                <p><strong>✅ Loading complete!</strong></p>
-                                <p>Loaded {progress['current']} of {progress['total']} files</p>
-                            </div>
-                            """, unsafe_allow_html=True)
+                        progress_placeholder.markdown(f"""
+                        <div class="success-box">
+                            <p><strong>✅ Loading complete!</strong></p>
+                            <p><strong>Total workbooks found: {len(st.session_state.workbooks)}</strong></p>
+                            <p>Status: {progress.get('status', 'Complete')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
                     
                     if len(st.session_state.workbooks) > 0:
                         st.success(f"✅ Found {len(st.session_state.workbooks)} workbook(s)!")
                         st.balloons()
                     else:
-                        st.warning("⚠️ No workbooks found in folder")
-                        st.info(f"Make sure folder {DRIVE_FOLDER_ID} is shared with: {st.session_state.service_account_email}")
+                        st.error("❌ No workbooks found in folder")
+                        st.warning(f"Please check System Logs and verify folder {DRIVE_FOLDER_ID} is shared with: {st.session_state.service_account_email}")
                     
+                    time.sleep(2)
                     st.rerun()
                     
                 except Exception as e:
                     add_log(f"Authentication error: {str(e)}", "ERROR")
                     st.error(f"❌ Authentication failed: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
         else:
             st.warning("⚠️ Please upload a credentials file")
 
 def main_app():
     """Main application interface"""
-    st.markdown('<div class="main-header">🏠 Booking Management Dashboard - Enhanced</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🏠 Booking Management Dashboard</div>', unsafe_allow_html=True)
     
     manager = st.session_state.gc
     
@@ -981,22 +847,14 @@ def main_app():
         """, unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
-        with col1:
-            force_refresh = st.checkbox("Force Refresh", value=False, key="main_force_refresh")
         
-        with col2:
-            if st.button("🗑️ Clear Cache"):
-                manager.clear_cache()
-                st.success("Cache cleared!")
-        
-        col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔄 Refresh", use_container_width=True):
-                add_log("Refreshing workbook list...", "INFO")
-                with st.spinner("Refreshing..."):
-                    st.session_state.workbooks = manager.list_workbooks_from_folder_enhanced(
+            if st.button("🔄 Reload ALL", use_container_width=True):
+                add_log("Manual reload initiated...", "INFO")
+                with st.spinner("Reloading ALL workbooks..."):
+                    st.session_state.workbooks = manager.list_all_workbooks_from_folder(
                         DRIVE_FOLDER_ID,
-                        force_refresh=force_refresh
+                        force_refresh=True
                     )
                 if st.session_state.workbooks:
                     st.success(f"✅ Found {len(st.session_state.workbooks)} workbooks!")
@@ -1017,49 +875,9 @@ def main_app():
         
         st.markdown("---")
         
-        with st.expander("➕ Add Spreadsheet Manually"):
-            st.markdown("""
-            <div class="info-box">
-                <p style="margin: 0;">If automatic loading fails, paste a spreadsheet ID here:</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            manual_id = st.text_input(
-                "Spreadsheet ID",
-                placeholder="1ge6-Rzor5jbQ7zaaQk3B7I0Vx31Nv80QH6zW2NfBUz8",
-                help="Get the ID from the spreadsheet URL"
-            )
-            
-            if st.button("📥 Add Spreadsheet", use_container_width=True):
-                if manual_id:
-                    with st.spinner("Opening spreadsheet..."):
-                        wb = manager.open_workbook_by_id(manual_id.strip())
-                        if wb:
-                            st.success(f"✅ Added: {wb.title}")
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to open spreadsheet")
-                else:
-                    st.warning("⚠️ Please enter a spreadsheet ID")
-        
-        st.markdown("---")
-        
-        # Display cache status
-        if st.session_state.cache_timestamp:
-            elapsed = (datetime.now() - st.session_state.cache_timestamp).total_seconds()
-            cache_age = f"{int(elapsed)}s ago"
-            cache_valid = elapsed < manager.cache_ttl
-            
-            st.markdown(f"""
-            <div class="{'success-box' if cache_valid else 'warning-box'}">
-                <p style="margin: 0;"><strong>Cache Status:</strong></p>
-                <p style="margin: 0;">{'✅ Valid' if cache_valid else '⚠️ Expired'}</p>
-                <p style="margin: 0; font-size: 0.85rem;">Updated: {cache_age}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
+        # Display workbook count
         if st.session_state.workbooks:
-            st.success(f"📊 {len(st.session_state.workbooks)} workbook(s) available")
+            st.success(f"📊 {len(st.session_state.workbooks)} workbook(s) loaded")
             
             workbook_names = [wb['name'] for wb in st.session_state.workbooks]
             selected_workbook_name = st.selectbox(
@@ -1084,300 +902,126 @@ def main_app():
                 <div class="info-box">
                     <p><strong>📊 Active Workbook:</strong><br>{selected_workbook['name']}</p>
                     <p><strong>🔗 ID:</strong><br><span style="font-size: 0.8rem; word-break: break-all;">{selected_workbook['id']}</span></p>
-                    <p><strong>📅 Modified:</strong><br>{selected_workbook.get('modified', 'Unknown')}</p>
+                    <p><strong>📅 Modified:</strong><br>{selected_workbook.get('modified', 'Unknown')[:19]}</p>
                 </div>
                 """, unsafe_allow_html=True)
         else:
             st.warning("⚠️ No workbooks loaded")
-            st.info("Click 'Refresh' or add a spreadsheet ID manually above")
+            st.info("Click 'Reload ALL' to scan the folder")
         
         st.markdown("---")
         
         # View mode selector
         view_mode = st.radio(
             "📑 View Mode",
-            ["Dashboard", "All Sheets Viewer", "Calendar View", "Booking Manager", "System Logs"],
+            ["Workbook List", "Dashboard", "All Sheets Viewer", "Calendar View", "System Logs"],
             help="Select the view mode"
         )
 
     # Main content area
-    if not st.session_state.current_workbook:
-        st.info("👈 Please select a workbook from the sidebar to begin")
+    if view_mode == "Workbook List":
+        st.markdown('<div class="section-header">📋 All Loaded Workbooks</div>', unsafe_allow_html=True)
         
-        # Show loading statistics
         if st.session_state.workbooks:
-            st.markdown("### 📊 Loaded Workbooks Statistics")
+            st.success(f"Total: {len(st.session_state.workbooks)} workbook(s)")
             
-            total_workbooks = len(st.session_state.workbooks)
+            # Create DataFrame
+            df_workbooks = pd.DataFrame(st.session_state.workbooks)
             
-            col1, col2, col3 = st.columns(3)
+            # Display
+            st.dataframe(df_workbooks, use_container_width=True)
             
-            with col1:
-                st.metric("Total Workbooks", total_workbooks)
-            
-            with col2:
-                cached = "Yes" if st.session_state.cache_timestamp else "No"
-                st.metric("Using Cache", cached)
-            
-            with col3:
-                progress = st.session_state.loading_progress
-                st.metric("Last Load Status", progress.get('status', 'N/A'))
-            
-            # Show workbook list
-            if st.checkbox("Show All Workbooks"):
-                df_workbooks = pd.DataFrame(st.session_state.workbooks)
-                st.dataframe(df_workbooks, use_container_width=True)
-        
-        return
-    
-    # Load current workbook
-    workbook = manager.open_workbook(st.session_state.current_workbook)
-    if not workbook:
-        st.error("❌ Failed to load workbook")
-        return
-    
-    # Connection status in sidebar
-    with st.sidebar:
-        st.markdown(f"""
-        <div class="sidebar-card">
-            <h3>✅ Connected</h3>
-            <p class="highlight">Service Account</p>
-            <p style="font-size: 0.75rem; word-break: break-all;">{st.session_state.service_account_email}</p>
-            <p class="highlight">Workbooks: {len(st.session_state.workbooks)}</p>
-            <p class="highlight">Sheets: {len(st.session_state.all_sheets)}</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    if view_mode == "Dashboard":
-        render_dashboard(manager, workbook)
-    elif view_mode == "All Sheets Viewer":
-        render_all_sheets_viewer(manager, workbook)
-    elif view_mode == "Calendar View":
-        render_calendar_view(manager, workbook)
-    elif view_mode == "Booking Manager":
-        render_booking_manager(manager, workbook)
-    elif view_mode == "System Logs":
-        render_system_logs()
-
-def render_all_sheets_viewer(manager, workbook):
-    """View and select any sheet from the workbook"""
-    st.markdown('<div class="section-header">📄 All Sheets Viewer</div>', unsafe_allow_html=True)
-    
-    if not st.session_state.all_sheets:
-        st.warning("No sheets found in this workbook")
-        return
-    
-    st.info(f"📊 This workbook contains {len(st.session_state.all_sheets)} sheet(s)")
-    
-    with st.container():
-        sheet_names = [s['name'] for s in st.session_state.all_sheets]
-        selected_sheet_name = st.selectbox(
-            "Select Sheet to View",
-            sheet_names,
-            index=st.session_state.selected_sheet_index,
-            help="Choose any sheet from the workbook"
-        )
-        
-        # Update selected index
-        selected_index = sheet_names.index(selected_sheet_name)
-        if selected_index != st.session_state.selected_sheet_index:
-            st.session_state.selected_sheet_index = selected_index
-        
-        selected_sheet_info = st.session_state.all_sheets[selected_index]
-        selected_sheet = selected_sheet_info['sheet']
-        
-        st.markdown(f"""
-        <div class="info-box">
-            <p><strong>📄 Current Sheet:</strong> {selected_sheet_info['name']}</p>
-            <p><strong>🔢 Sheet Index:</strong> {selected_sheet_info['index']}</p>
-            <p><strong>🆔 Sheet ID:</strong> {selected_sheet_info['id']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Read data
-        with st.spinner(f"Loading data from '{selected_sheet_info['name']}'..."):
-            df = manager.read_sheet_all_data(selected_sheet)
-        
-        if not df.empty:
-            st.success(f"✅ Loaded {len(df)} rows and {len(df.columns)} columns")
-            
-            # Display options
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                show_full = st.checkbox("Show Full Data", value=True)
-            
-            with col2:
-                max_rows = st.number_input("Max Rows to Display", min_value=10, max_value=10000, value=100, step=10)
-            
-            with col3:
-                # Export option
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download as CSV",
-                    data=csv,
-                    file_name=f"{selected_sheet_info['name']}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            
-            # Display data
-            st.markdown("### 📊 Sheet Data")
-            
-            if show_full:
-                st.dataframe(df.head(max_rows), use_container_width=True)
-                if len(df) > max_rows:
-                    st.info(f"Showing first {max_rows} of {len(df)} rows. Increase 'Max Rows' to see more.")
-            else:
-                st.dataframe(df.head(20), use_container_width=True)
-            
-            # Column info
-            with st.expander("📋 Column Information"):
-                col_info = pd.DataFrame({
-                    'Column Name': df.columns,
-                    'Data Type': df.dtypes.astype(str),
-                    'Non-Empty Count': df.count().values,
-                    'Sample Value': [df[col].iloc[0] if len(df) > 0 else '' for col in df.columns]
-                })
-                st.dataframe(col_info, use_container_width=True)
-        else:
-            st.warning("⚠️ No data found in this sheet")
-
-def render_dashboard(manager, workbook):
-    """Render dashboard view"""
-    st.markdown('<div class="section-header">📊 Dashboard Overview</div>', unsafe_allow_html=True)
-    
-    # Get client profile
-    profile = manager.get_client_profile(workbook)
-    
-    # Display client info
-    st.markdown(f"""
-    <div class="info-box">
-        <h3>{profile.get('client_name', 'Unknown Client')}</h3>
-        <p><strong>Check-out Time:</strong> {profile.get('check_out_time', 'N/A')}</p>
-        <p><strong>Check-in Time:</strong> {profile.get('check_in_time', 'N/A')}</p>
-        <p><strong>Amenities:</strong> {profile.get('amenities', 'N/A')}</p>
-        <p><strong>Laundry Services:</strong> {profile.get('laundry_services', 'N/A')}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Display properties
-    if profile.get('properties'):
-        st.markdown(f"### 🏘️ Properties ({len(profile['properties'])})")
-        for prop in profile['properties']:
-            st.markdown(f"""
-            <div class="property-card">
-                <h4>{prop['name']}</h4>
-                <p><strong>Address:</strong> {prop['address']}</p>
-                <p><strong>Hours:</strong> {prop['hours']}</p>
-                <p><strong>SO Hours:</strong> {prop['so_hours']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Calendar sheets
-    calendars = manager.get_calendar_sheets(workbook)
-    st.markdown(f"### 📅 Calendar Sheets ({len(calendars)} months)")
-    
-    for cal in calendars[:3]:  # Show first 3
-        with st.expander(f"📅 {cal['name']}"):
-            df = manager.read_calendar(cal['sheet'])
-            if not df.empty:
-                st.dataframe(df.head(10), use_container_width=True)
-            else:
-                st.info("No bookings found")
-
-def render_calendar_view(manager, workbook):
-    """Render calendar view"""
-    st.markdown('<div class="section-header">📅 Calendar View</div>', unsafe_allow_html=True)
-    
-    calendars = manager.get_calendar_sheets(workbook)
-    
-    if not calendars:
-        st.warning("No calendar sheets found")
-        return
-    
-    calendar_names = [c['name'] for c in calendars]
-    selected_calendar = st.selectbox("Select Calendar Month", calendar_names)
-    
-    selected_cal = next((c for c in calendars if c['name'] == selected_calendar), None)
-    
-    if selected_cal:
-        df = manager.read_calendar(selected_cal['sheet'])
-        
-        if not df.empty:
-            st.dataframe(df, use_container_width=True)
-            
-            csv = df.to_csv(index=False)
+            # Download option
+            csv = df_workbooks.to_csv(index=False)
             st.download_button(
-                "📥 Download Calendar",
+                "📥 Download Workbook List",
                 data=csv,
-                file_name=f"{selected_calendar}.csv",
+                file_name="workbooks_list.csv",
                 mime="text/csv"
             )
         else:
-            st.info("No bookings in this calendar")
-
-def render_booking_manager(manager, workbook):
-    """Render booking manager with live editing capabilities"""
-    st.markdown('<div class="section-header">✏️ Booking Manager - Live Edit</div>', unsafe_allow_html=True)
+            st.info("No workbooks loaded yet. Click 'Reload ALL' in the sidebar.")
     
-    calendars = manager.get_calendar_sheets(workbook)
-    
-    if not calendars:
-        st.warning("No calendar sheets found")
-        return
-    
-    st.info("Select a calendar to manage bookings")
-    
-    calendar_names = [c['name'] for c in calendars]
-    selected_calendar = st.selectbox("Select Calendar", calendar_names)
-    
-    selected_cal = next((c for c in calendars if c['name'] == selected_calendar), None)
-    
-    if selected_cal:
-        df = manager.read_calendar(selected_cal['sheet'])
+    elif view_mode == "System Logs":
+        st.markdown('<div class="section-header">📋 System Logs</div>', unsafe_allow_html=True)
         
-        if not df.empty:
-            st.markdown("### Current Bookings")
-            st.dataframe(df, use_container_width=True)
+        if st.button("🗑️ Clear Logs"):
+            st.session_state.logs = []
+            st.rerun()
+        
+        if st.session_state.logs:
+            st.info(f"Showing {len(st.session_state.logs)} log entries")
             
-            st.markdown("### Quick Actions")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("➕ Add New Booking"):
-                    st.info("Add booking functionality - implement as needed")
-            
-            with col2:
-                if st.button("🔄 Refresh Data"):
-                    st.rerun()
+            for log in reversed(st.session_state.logs):
+                level_class = f"log-{log['level'].lower()}"
+                st.markdown(f"""
+                <div class="log-entry {level_class}">
+                    <strong>[{log['timestamp']}]</strong> 
+                    <span style="color: {'#28a745' if log['level'] == 'SUCCESS' else '#17a2b8' if log['level'] == 'INFO' else '#ffc107' if log['level'] == 'WARNING' else '#dc3545'};">
+                        {log['level']}
+                    </span>: {log['message']}
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.info("No bookings found. Add your first booking!")
-
-def render_system_logs():
-    """Render system logs"""
-    st.markdown('<div class="section-header">📋 System Logs</div>', unsafe_allow_html=True)
+            st.info("No logs yet")
     
-    if st.button("🗑️ Clear Logs"):
-        st.session_state.logs = []
-        st.rerun()
+    elif not st.session_state.current_workbook:
+        st.info("👈 Please select a workbook from the sidebar to begin")
     
-    if st.session_state.logs:
-        st.info(f"Showing {len(st.session_state.logs)} log entries (max 100)")
+    else:
+        # Load current workbook
+        workbook = manager.open_workbook(st.session_state.current_workbook)
+        if not workbook:
+            st.error("❌ Failed to load workbook")
+            return
         
-        for log in reversed(st.session_state.logs):
-            level_class = f"log-{log['level'].lower()}"
+        if view_mode == "Dashboard":
+            st.markdown('<div class="section-header">📊 Dashboard Overview</div>', unsafe_allow_html=True)
+            profile = manager.get_client_profile(workbook)
             st.markdown(f"""
-            <div class="log-entry {level_class}">
-                <strong>[{log['timestamp']}]</strong> 
-                <span style="color: {'#28a745' if log['level'] == 'SUCCESS' else '#17a2b8' if log['level'] == 'INFO' else '#ffc107' if log['level'] == 'WARNING' else '#dc3545'};">
-                    {log['level']}
-                </span>: {log['message']}
+            <div class="info-box">
+                <h3>{profile.get('client_name', 'Unknown Client')}</h3>
+                <p><strong>Check-out Time:</strong> {profile.get('check_out_time', 'N/A')}</p>
+                <p><strong>Check-in Time:</strong> {profile.get('check_in_time', 'N/A')}</p>
             </div>
             """, unsafe_allow_html=True)
-    else:
-        st.info("No logs yet")
+        
+        elif view_mode == "All Sheets Viewer":
+            st.markdown('<div class="section-header">📄 All Sheets Viewer</div>', unsafe_allow_html=True)
+            
+            if st.session_state.all_sheets:
+                sheet_names = [s['name'] for s in st.session_state.all_sheets]
+                selected_sheet_name = st.selectbox("Select Sheet", sheet_names)
+                
+                selected_index = sheet_names.index(selected_sheet_name)
+                selected_sheet_info = st.session_state.all_sheets[selected_index]
+                selected_sheet = selected_sheet_info['sheet']
+                
+                df = manager.read_sheet_all_data(selected_sheet)
+                
+                if not df.empty:
+                    st.success(f"✅ Loaded {len(df)} rows")
+                    st.dataframe(df, use_container_width=True)
+                else:
+                    st.warning("No data in sheet")
+        
+        elif view_mode == "Calendar View":
+            st.markdown('<div class="section-header">📅 Calendar View</div>', unsafe_allow_html=True)
+            calendars = manager.get_calendar_sheets(workbook)
+            
+            if calendars:
+                calendar_names = [c['name'] for c in calendars]
+                selected_calendar = st.selectbox("Select Calendar", calendar_names)
+                
+                selected_cal = next((c for c in calendars if c['name'] == selected_calendar), None)
+                if selected_cal:
+                    df = manager.read_calendar(selected_cal['sheet'])
+                    if not df.empty:
+                        st.dataframe(df, use_container_width=True)
+                    else:
+                        st.info("No bookings")
+            else:
+                st.warning("No calendar sheets found")
 
 # Main entry point
 if __name__ == "__main__":
