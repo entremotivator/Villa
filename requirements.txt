@@ -3,3 +3,4 @@ google-auth
 pandas 
 plotly 
 openpyxl
+google-api-python-client
