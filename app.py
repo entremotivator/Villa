@@ -307,49 +307,103 @@ class BookingManager:
         try:
             add_log(f"Listing workbooks from folder: {folder_id}", "INFO")
             
-            from googleapiclient.discovery import build
+            try:
+                from googleapiclient.discovery import build
+                from googleapiclient.errors import HttpError
+                add_log("Google API client imported successfully", "INFO")
+            except ImportError as e:
+                add_log(f"Failed to import Google API client: {str(e)}", "ERROR")
+                add_log("Attempting to use gspread's built-in methods instead...", "WARNING")
+                return self._list_workbooks_fallback(folder_id)
             
-            drive_service = build('drive', 'v3', credentials=self.creds)
+            try:
+                # Build Drive service
+                add_log("Building Drive API service...", "INFO")
+                drive_service = build('drive', 'v3', credentials=self.creds)
+                add_log("Drive API service created successfully", "SUCCESS")
+                
+                # Query for spreadsheets in the specific folder
+                query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+                
+                add_log(f"Executing Drive API query: {query}", "INFO")
+                
+                results = drive_service.files().list(
+                    q=query,
+                    pageSize=100,
+                    fields="files(id, name, webViewLink, modifiedTime, owners)",
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True
+                ).execute()
+                
+                files = results.get('files', [])
+                add_log(f"Drive API returned {len(files)} file(s)", "INFO")
+                
+                workbooks = []
+                for file in files:
+                    workbook_info = {
+                        'id': file['id'],
+                        'name': file['name'],
+                        'url': file.get('webViewLink', f"https://docs.google.com/spreadsheets/d/{file['id']}"),
+                        'modified': file.get('modifiedTime', 'Unknown')
+                    }
+                    workbooks.append(workbook_info)
+                    add_log(f"  ✓ Found: {file['name']} (ID: {file['id']})", "SUCCESS")
+                
+                if len(workbooks) == 0:
+                    add_log("No workbooks found in folder", "WARNING")
+                    add_log(f"Make sure folder {folder_id} is shared with: {st.session_state.service_account_email}", "WARNING")
+                else:
+                    add_log(f"Successfully loaded {len(workbooks)} workbook(s) from folder", "SUCCESS")
+                
+                return workbooks
+                
+            except HttpError as e:
+                add_log(f"Drive API HTTP Error: {str(e)}", "ERROR")
+                add_log("Attempting fallback method...", "WARNING")
+                return self._list_workbooks_fallback(folder_id)
+            except Exception as e:
+                add_log(f"Drive API Error: {str(e)}", "ERROR")
+                add_log("Attempting fallback method...", "WARNING")
+                return self._list_workbooks_fallback(folder_id)
+                
+        except Exception as e:
+            add_log(f"Error listing workbooks from folder: {str(e)}", "ERROR")
+            return []
+    
+    def _list_workbooks_fallback(self, folder_id: str) -> List[Dict]:
+        """Fallback method to list workbooks using gspread"""
+        try:
+            add_log("Using gspread fallback method to list spreadsheets...", "INFO")
             
-            # Query for spreadsheets in the specific folder
-            query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
-            
-            add_log(f"Executing Drive API query: {query}", "INFO")
-            
-            results = drive_service.files().list(
-                q=query,
-                pageSize=100,
-                fields="files(id, name, webViewLink, modifiedTime)"
-            ).execute()
-            
-            files = results.get('files', [])
+            all_spreadsheets = self.gc.openall()
+            add_log(f"Found {len(all_spreadsheets)} accessible spreadsheet(s)", "INFO")
             
             workbooks = []
-            for file in files:
-                workbooks.append({
-                    'id': file['id'],
-                    'name': file['name'],
-                    'url': file.get('webViewLink', f"https://docs.google.com/spreadsheets/d/{file['id']}"),
-                    'modified': file.get('modifiedTime', 'Unknown')
-                })
-                add_log(f"  Found: {file['name']} (ID: {file['id']})", "INFO")
+            for sheet in all_spreadsheets:
+                workbook_info = {
+                    'id': sheet.id,
+                    'name': sheet.title,
+                    'url': sheet.url,
+                    'modified': 'Unknown'
+                }
+                workbooks.append(workbook_info)
+                add_log(f"  ✓ {sheet.title} (ID: {sheet.id})", "INFO")
             
-            add_log(f"Successfully loaded {len(workbooks)} workbook(s) from folder", "SUCCESS")
-            
-            if len(workbooks) == 0:
-                add_log("No workbooks found. Make sure the folder is shared with the service account.", "WARNING")
+            if len(workbooks) > 0:
+                add_log(f"Fallback method found {len(workbooks)} workbook(s)", "SUCCESS")
+            else:
+                add_log("No accessible spreadsheets found", "WARNING")
             
             return workbooks
             
         except Exception as e:
-            add_log(f"Error listing workbooks from folder: {str(e)}", "ERROR")
-            add_log("Make sure the folder is shared with your service account email", "WARNING")
+            add_log(f"Fallback method also failed: {str(e)}", "ERROR")
             return []
     
     def open_workbook(self, workbook_id: str):
         """Open a specific workbook by ID"""
         try:
-            add_log(f"Opening workbook ID: {workbook_id[:20]}...", "INFO")
+            add_log(f"Opening workbook ID: {workbook_id}", "INFO")
             workbook = self.gc.open_by_key(workbook_id)
             add_log(f"Successfully opened: {workbook.title}", "SUCCESS")
             
@@ -584,12 +638,15 @@ def authenticate():
                         st.success("✅ Successfully connected to Google Sheets!")
                         
                         with st.spinner(f"Loading workbooks from folder {DRIVE_FOLDER_ID}..."):
+                            add_log("Starting workbook discovery...", "INFO")
                             st.session_state.workbooks = manager.list_workbooks_from_folder(DRIVE_FOLDER_ID)
                         
                         if len(st.session_state.workbooks) > 0:
+                            st.success(f"✅ Found {len(st.session_state.workbooks)} workbook(s)!")
                             st.balloons()
                         else:
-                            st.warning("⚠️ No workbooks found in folder. Make sure the folder is shared with your service account.")
+                            st.warning("⚠️ No workbooks found in folder")
+                            st.info(f"Make sure folder {DRIVE_FOLDER_ID} is shared with: {st.session_state.service_account_email}")
                         
                         st.rerun()
                         
@@ -719,10 +776,9 @@ def render_all_sheets_viewer(manager, workbook):
         st.warning("No sheets found in this workbook")
         return
     
-    # Sheet selector
     st.markdown('<div class="sheet-selector">', unsafe_allow_html=True)
     
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([3, 1, 1])
     
     with col1:
         sheet_names = [sheet['name'] for sheet in st.session_state.all_sheets]
@@ -739,6 +795,10 @@ def render_all_sheets_viewer(manager, workbook):
     with col2:
         st.metric("Total Sheets", len(st.session_state.all_sheets))
     
+    with col3:
+        if st.button("🔄 Refresh"):
+            st.rerun()
+    
     st.markdown('</div>', unsafe_allow_html=True)
     
     # Get selected sheet
@@ -753,8 +813,7 @@ def render_all_sheets_viewer(manager, workbook):
     </div>
     """, unsafe_allow_html=True)
     
-    # Display options
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         view_type = st.radio(
@@ -764,11 +823,7 @@ def render_all_sheets_viewer(manager, workbook):
         )
     
     with col2:
-        show_empty = st.checkbox("Show Empty Rows", value=False)
-    
-    with col3:
-        if st.button("🔄 Refresh Sheet Data"):
-            st.rerun()
+        show_info = st.checkbox("Show Sheet Statistics", value=True)
     
     # Load and display data
     with st.spinner(f"Loading {selected_sheet_info['name']}..."):
@@ -793,23 +848,25 @@ def render_all_sheets_viewer(manager, workbook):
                 label="📥 Download as CSV",
                 data=csv,
                 file_name=f"{selected_sheet_info['name']}.csv",
-                mime="text/csv"
+                mime="text/csv",
+                use_container_width=True
             )
             
             # Show statistics
-            st.markdown("### 📊 Sheet Statistics")
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Total Rows", len(df))
-            with col2:
-                st.metric("Total Columns", len(df.columns))
-            with col3:
-                non_empty = df.notna().sum().sum()
-                st.metric("Non-Empty Cells", non_empty)
-            with col4:
-                empty = df.isna().sum().sum()
-                st.metric("Empty Cells", empty)
+            if show_info:
+                st.markdown("### 📊 Sheet Statistics")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total Rows", len(df))
+                with col2:
+                    st.metric("Total Columns", len(df.columns))
+                with col3:
+                    non_empty = df.notna().sum().sum()
+                    st.metric("Non-Empty Cells", non_empty)
+                with col4:
+                    empty = df.isna().sum().sum()
+                    st.metric("Empty Cells", empty)
         else:
             st.warning("⚠️ No data found in this sheet")
 
