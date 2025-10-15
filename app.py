@@ -324,6 +324,14 @@ class BookingManager:
             add_log("Creating Google Sheets client...", "INFO")
             self.gc = gspread.authorize(self.creds)
             
+            try:
+                from googleapiclient.discovery import build
+                self.drive_service = build('drive', 'v3', credentials=self.creds)
+                add_log("✅ Drive API service initialized", "SUCCESS")
+            except ImportError:
+                self.drive_service = None
+                add_log("⚠️ google-api-python-client not installed - install with: pip install google-api-python-client", "WARNING")
+            
             # Store service account email
             st.session_state.service_account_email = credentials_dict.get('client_email', 'Unknown')
             
@@ -335,148 +343,104 @@ class BookingManager:
             raise
     
     def list_workbooks_from_folder(self, folder_id: str) -> List[Dict]:
-        """List all spreadsheets from a specific Google Drive folder using multiple methods"""
+        """List all spreadsheets from a specific Google Drive folder"""
         try:
-            add_log("=" * 60, "INFO")
-            add_log(f"STARTING FOLDER SCAN: {folder_id}", "INFO")
-            add_log("=" * 60, "INFO")
+            add_log("=" * 70, "INFO")
+            add_log(f"🔍 SCANNING GOOGLE DRIVE FOLDER", "INFO")
+            add_log(f"📁 Folder ID: {folder_id}", "INFO")
+            add_log(f"👤 Service Account: {st.session_state.service_account_email}", "INFO")
+            add_log("=" * 70, "INFO")
             
             workbooks = []
-            workbook_ids_found = set()
             
-            add_log("METHOD 1: Attempting Google Drive API v3...", "INFO")
-            try:
-                from googleapiclient.discovery import build
-                from googleapiclient.errors import HttpError
+            if self.drive_service:
+                add_log("🚀 Using Google Drive API v3...", "INFO")
                 
-                add_log("Building Drive service...", "INFO")
-                drive_service = build('drive', 'v3', credentials=self.creds)
-                
-                query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
-                add_log(f"Query: {query}", "INFO")
-                
-                page_token = None
-                page_num = 0
-                
-                while True:
-                    page_num += 1
-                    add_log(f"Fetching page {page_num}...", "INFO")
+                try:
+                    query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+                    add_log(f"📋 Query: {query}", "INFO")
                     
-                    results = drive_service.files().list(
-                        q=query,
-                        pageSize=100,
-                        fields="nextPageToken, files(id, name, webViewLink, modifiedTime, owners, permissions)",
-                        supportsAllDrives=True,
-                        includeItemsFromAllDrives=True,
-                        corpora='allDrives',
-                        pageToken=page_token
-                    ).execute()
+                    page_token = None
+                    total_files = 0
+                    page_num = 0
                     
-                    files = results.get('files', [])
-                    add_log(f"Page {page_num}: Found {len(files)} file(s)", "INFO")
-                    
-                    for file in files:
-                        if file['id'] not in workbook_ids_found:
-                            workbook_ids_found.add(file['id'])
+                    while True:
+                        page_num += 1
+                        add_log(f"📄 Fetching page {page_num}...", "INFO")
+                        
+                        results = self.drive_service.files().list(
+                            q=query,
+                            pageSize=100,
+                            fields="nextPageToken, files(id, name, webViewLink, modifiedTime, owners)",
+                            supportsAllDrives=True,
+                            includeItemsFromAllDrives=True,
+                            corpora='allDrives',
+                            pageToken=page_token
+                        ).execute()
+                        
+                        files = results.get('files', [])
+                        add_log(f"   Found {len(files)} file(s) on page {page_num}", "INFO")
+                        
+                        for file in files:
+                            total_files += 1
                             workbooks.append({
                                 'id': file['id'],
                                 'name': file['name'],
                                 'url': file.get('webViewLink', f"https://docs.google.com/spreadsheets/d/{file['id']}"),
                                 'modified': file.get('modifiedTime', 'Unknown')
                             })
-                            add_log(f"  ✓ Found: {file['name']} (ID: {file['id']})", "SUCCESS")
-                    
-                    page_token = results.get('nextPageToken')
-                    if not page_token:
-                        break
-                
-                if workbooks:
-                    add_log(f"✅ METHOD 1 SUCCESS: Found {len(workbooks)} workbook(s) via Drive API", "SUCCESS")
-                    return workbooks
-                else:
-                    add_log("⚠️ METHOD 1: Drive API returned no files", "WARNING")
-                    
-            except ImportError as e:
-                add_log(f"⚠️ METHOD 1 FAILED: google-api-python-client not installed", "WARNING")
-                add_log("Install with: pip install google-api-python-client", "INFO")
-            except HttpError as e:
-                add_log(f"⚠️ METHOD 1 FAILED: HTTP Error {e.resp.status}: {e.error_details}", "ERROR")
-                if e.resp.status == 403:
-                    add_log("Permission denied - check service account has access to folder", "ERROR")
-                elif e.resp.status == 404:
-                    add_log("Folder not found - check folder ID is correct", "ERROR")
-            except Exception as e:
-                add_log(f"⚠️ METHOD 1 FAILED: {type(e).__name__}: {str(e)}", "ERROR")
-            
-            add_log("METHOD 2: Attempting to open example spreadsheets...", "INFO")
-            for sheet_id in EXAMPLE_SPREADSHEET_IDS:
-                try:
-                    add_log(f"Trying to open: {sheet_id}", "INFO")
-                    sheet = self.gc.open_by_key(sheet_id)
-                    
-                    if sheet.id not in workbook_ids_found:
-                        workbook_ids_found.add(sheet.id)
-                        workbooks.append({
-                            'id': sheet.id,
-                            'name': sheet.title,
-                            'url': sheet.url,
-                            'modified': 'Unknown'
-                        })
-                        add_log(f"  ✓ Opened: {sheet.title}", "SUCCESS")
-                    else:
-                        add_log(f"  ⊙ Already found: {sheet.title}", "INFO")
+                            add_log(f"   ✅ {total_files}. {file['name']}", "SUCCESS")
+                            add_log(f"      ID: {file['id']}", "INFO")
                         
-                except gspread.exceptions.SpreadsheetNotFound:
-                    add_log(f"  ✗ Not found: {sheet_id}", "WARNING")
-                except gspread.exceptions.APIError as e:
-                    add_log(f"  ✗ API Error for {sheet_id}: {str(e)}", "ERROR")
-                except Exception as e:
-                    add_log(f"  ✗ Error opening {sheet_id}: {str(e)}", "ERROR")
-            
-            if workbooks:
-                add_log(f"✅ METHOD 2 SUCCESS: Found {len(workbooks)} workbook(s) via example IDs", "SUCCESS")
-                return workbooks
-            
-            add_log("METHOD 3: Listing all accessible spreadsheets...", "INFO")
-            try:
-                all_spreadsheets = self.gc.openall()
-                add_log(f"Found {len(all_spreadsheets)} total accessible spreadsheet(s)", "INFO")
-                
-                for sheet in all_spreadsheets:
-                    if sheet.id not in workbook_ids_found:
-                        workbook_ids_found.add(sheet.id)
-                        workbooks.append({
-                            'id': sheet.id,
-                            'name': sheet.title,
-                            'url': sheet.url,
-                            'modified': 'Unknown'
-                        })
-                        add_log(f"  ✓ {sheet.title}", "INFO")
-                
-                if workbooks:
-                    add_log(f"✅ METHOD 3 SUCCESS: Found {len(workbooks)} workbook(s) via openall()", "SUCCESS")
+                        page_token = results.get('nextPageToken')
+                        if not page_token:
+                            break
+                    
+                    add_log("=" * 70, "SUCCESS")
+                    add_log(f"✅ SCAN COMPLETE: Found {total_files} spreadsheet(s)", "SUCCESS")
+                    add_log("=" * 70, "SUCCESS")
+                    
+                    if total_files == 0:
+                        add_log("", "WARNING")
+                        add_log("⚠️ NO SPREADSHEETS FOUND IN FOLDER", "WARNING")
+                        add_log("", "WARNING")
+                        add_log("TROUBLESHOOTING:", "WARNING")
+                        add_log(f"1. Verify folder ID is correct: {folder_id}", "WARNING")
+                        add_log(f"2. Share folder with: {st.session_state.service_account_email}", "WARNING")
+                        add_log("3. Grant 'Viewer' or 'Editor' access", "WARNING")
+                        add_log("4. Check that spreadsheets exist in the folder", "WARNING")
+                        add_log("5. Wait a few minutes after sharing for permissions to propagate", "WARNING")
+                    
                     return workbooks
                     
-            except Exception as e:
-                add_log(f"⚠️ METHOD 3 FAILED: {str(e)}", "ERROR")
-            
-            add_log("=" * 60, "ERROR")
-            add_log("❌ ALL METHODS FAILED - NO WORKBOOKS FOUND", "ERROR")
-            add_log("=" * 60, "ERROR")
-            add_log("", "INFO")
-            add_log("TROUBLESHOOTING STEPS:", "WARNING")
-            add_log("1. Verify folder ID is correct: " + folder_id, "WARNING")
-            add_log(f"2. Share folder with service account: {st.session_state.service_account_email}", "WARNING")
-            add_log("3. Grant 'Viewer' or 'Editor' access to the service account", "WARNING")
-            add_log("4. Check that spreadsheets exist in the folder", "WARNING")
-            add_log("5. Verify Drive API is enabled in Google Cloud Console", "WARNING")
-            add_log("", "INFO")
-            add_log("You can manually add spreadsheet IDs using the sidebar", "INFO")
-            
-            return []
+                except Exception as e:
+                    add_log(f"❌ Drive API Error: {str(e)}", "ERROR")
+                    add_log(f"Error type: {type(e).__name__}", "ERROR")
+                    
+                    if "403" in str(e):
+                        add_log("", "ERROR")
+                        add_log("🔒 PERMISSION DENIED", "ERROR")
+                        add_log(f"The service account does not have access to this folder.", "ERROR")
+                        add_log(f"", "ERROR")
+                        add_log(f"TO FIX:", "WARNING")
+                        add_log(f"1. Open: https://drive.google.com/drive/folders/{folder_id}", "WARNING")
+                        add_log(f"2. Click 'Share' button", "WARNING")
+                        add_log(f"3. Add: {st.session_state.service_account_email}", "WARNING")
+                        add_log(f"4. Grant 'Viewer' or 'Editor' access", "WARNING")
+                        add_log(f"5. Click 'Send' and wait 1-2 minutes", "WARNING")
+                    elif "404" in str(e):
+                        add_log("", "ERROR")
+                        add_log("❌ FOLDER NOT FOUND", "ERROR")
+                        add_log(f"Folder ID '{folder_id}' does not exist or is not accessible", "ERROR")
+                    
+                    return []
+            else:
+                add_log("❌ Drive API not available", "ERROR")
+                add_log("Install google-api-python-client: pip install google-api-python-client", "ERROR")
+                return []
                 
         except Exception as e:
-            add_log(f"CRITICAL ERROR in list_workbooks_from_folder: {str(e)}", "ERROR")
+            add_log(f"❌ CRITICAL ERROR: {str(e)}", "ERROR")
             return []
     
     def open_workbook_by_id(self, workbook_id: str):
@@ -764,7 +728,8 @@ def authenticate():
         <div class="drive-config-card">
             <h3 style="color: white; margin-top: 0;">📁 Google Drive Folder</h3>
             <p style="color: white;"><strong>Folder ID:</strong> {DRIVE_FOLDER_ID}</p>
-            <p style="color: white; font-size: 0.9rem;">All workbooks will be loaded from this folder automatically.</p>
+            <p style="color: white;"><a href="https://drive.google.com/drive/folders/{DRIVE_FOLDER_ID}" target="_blank" style="color: white; text-decoration: underline;">🔗 Open Folder in Google Drive</a></p>
+            <p style="color: white; font-size: 0.9rem; margin-top: 1rem;">⚠️ Make sure to share this folder with your service account email!</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -789,6 +754,8 @@ def authenticate():
         """, unsafe_allow_html=True)
         
         st.markdown("---")
+        
+        st.warning("📦 Required: `pip install google-api-python-client`")
         
         st.info("📁 Upload your service account credentials JSON file")
         uploaded_file = st.file_uploader(
@@ -815,16 +782,29 @@ def authenticate():
                         add_log("Authentication completed successfully!", "SUCCESS")
                         st.success("✅ Successfully connected to Google Sheets!")
                         
-                        with st.spinner(f"Loading workbooks from folder {DRIVE_FOLDER_ID}..."):
-                            add_log("Starting workbook discovery...", "INFO")
+                        st.info(f"📧 Service Account: {st.session_state.service_account_email}")
+                        st.info(f"📁 Make sure folder {DRIVE_FOLDER_ID} is shared with this email!")
+                        
+                        with st.spinner(f"Scanning folder for spreadsheets..."):
+                            add_log("Starting folder scan...", "INFO")
                             st.session_state.workbooks = manager.list_workbooks_from_folder(DRIVE_FOLDER_ID)
                         
                         if len(st.session_state.workbooks) > 0:
-                            st.success(f"✅ Found {len(st.session_state.workbooks)} workbook(s)!")
+                            st.success(f"✅ Found {len(st.session_state.workbooks)} spreadsheet(s)!")
+                            for wb in st.session_state.workbooks:
+                                st.write(f"📊 {wb['name']}")
                             st.balloons()
                         else:
-                            st.warning("⚠️ No workbooks found in folder")
-                            st.info(f"Make sure folder {DRIVE_FOLDER_ID} is shared with: {st.session_state.service_account_email}")
+                            st.error("❌ No spreadsheets found in folder")
+                            st.markdown(f"""
+                            **To fix this:**
+                            1. Open [this folder](https://drive.google.com/drive/folders/{DRIVE_FOLDER_ID})
+                            2. Click the 'Share' button
+                            3. Add: `{st.session_state.service_account_email}`
+                            4. Grant 'Viewer' or 'Editor' access
+                            5. Click 'Send' and wait 1-2 minutes
+                            6. Click 'Refresh' button in the sidebar
+                            """)
                         
                         st.rerun()
                         
@@ -851,7 +831,7 @@ def main_app():
         </div>
         """, unsafe_allow_html=True)
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("🔄 Refresh", use_container_width=True):
                 add_log("Refreshing workbook list...", "INFO")
@@ -872,6 +852,10 @@ def main_app():
                 st.session_state.all_sheets = []
                 add_log("Logged out successfully", "INFO")
                 st.rerun()
+        
+        with col3:
+            # Add link to docs
+            st.markdown("[📖 Docs](https://docs.streamlit.io/library/api-reference/index)", unsafe_allow_html=True)
         
         st.markdown("---")
         
