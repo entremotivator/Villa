@@ -17,6 +17,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DRIVE_FOLDER_ID = "1Fk5dJGkm5dNMZkfsITe5Lt9x-yCsBiF2"
+EXAMPLE_SPREADSHEET_IDS = [
+    "1ge6-Rzor5jbQ7zaaQk3B7I0Vx31Nv80QH6zW2NfBUz8",
+    "1-I0lHMXrA16v07Qtc3BNqnjRux7PRf8fMxJhVlxAcME"
+]
 
 # Page Configuration
 st.set_page_config(
@@ -307,98 +311,119 @@ class BookingManager:
         try:
             add_log(f"Listing workbooks from folder: {folder_id}", "INFO")
             
+            workbooks = []
+            
+            # Method 1: Try Drive API
             try:
                 from googleapiclient.discovery import build
                 from googleapiclient.errors import HttpError
-                add_log("Google API client imported successfully", "INFO")
-            except ImportError as e:
-                add_log(f"Failed to import Google API client: {str(e)}", "ERROR")
-                add_log("Attempting to use gspread's built-in methods instead...", "WARNING")
-                return self._list_workbooks_fallback(folder_id)
-            
-            try:
-                # Build Drive service
-                add_log("Building Drive API service...", "INFO")
+                add_log("Attempting Drive API method...", "INFO")
+                
                 drive_service = build('drive', 'v3', credentials=self.creds)
-                add_log("Drive API service created successfully", "SUCCESS")
-                
-                # Query for spreadsheets in the specific folder
                 query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
-                
-                add_log(f"Executing Drive API query: {query}", "INFO")
                 
                 results = drive_service.files().list(
                     q=query,
                     pageSize=100,
-                    fields="files(id, name, webViewLink, modifiedTime, owners)",
+                    fields="files(id, name, webViewLink, modifiedTime)",
                     supportsAllDrives=True,
                     includeItemsFromAllDrives=True
                 ).execute()
                 
                 files = results.get('files', [])
-                add_log(f"Drive API returned {len(files)} file(s)", "INFO")
+                add_log(f"Drive API found {len(files)} file(s)", "INFO")
                 
-                workbooks = []
                 for file in files:
-                    workbook_info = {
+                    workbooks.append({
                         'id': file['id'],
                         'name': file['name'],
                         'url': file.get('webViewLink', f"https://docs.google.com/spreadsheets/d/{file['id']}"),
                         'modified': file.get('modifiedTime', 'Unknown')
-                    }
-                    workbooks.append(workbook_info)
-                    add_log(f"  ✓ Found: {file['name']} (ID: {file['id']})", "SUCCESS")
+                    })
+                    add_log(f"  ✓ {file['name']}", "SUCCESS")
                 
-                if len(workbooks) == 0:
-                    add_log("No workbooks found in folder", "WARNING")
-                    add_log(f"Make sure folder {folder_id} is shared with: {st.session_state.service_account_email}", "WARNING")
-                else:
-                    add_log(f"Successfully loaded {len(workbooks)} workbook(s) from folder", "SUCCESS")
-                
-                return workbooks
-                
-            except HttpError as e:
-                add_log(f"Drive API HTTP Error: {str(e)}", "ERROR")
-                add_log("Attempting fallback method...", "WARNING")
-                return self._list_workbooks_fallback(folder_id)
+                if workbooks:
+                    add_log(f"Drive API method successful: {len(workbooks)} workbook(s)", "SUCCESS")
+                    return workbooks
+                    
+            except ImportError:
+                add_log("google-api-python-client not installed, trying alternative methods", "WARNING")
             except Exception as e:
-                add_log(f"Drive API Error: {str(e)}", "ERROR")
-                add_log("Attempting fallback method...", "WARNING")
-                return self._list_workbooks_fallback(folder_id)
+                add_log(f"Drive API method failed: {str(e)}", "WARNING")
+            
+            # Method 2: Try example spreadsheet IDs
+            add_log("Trying to open example spreadsheets from folder...", "INFO")
+            for sheet_id in EXAMPLE_SPREADSHEET_IDS:
+                try:
+                    sheet = self.gc.open_by_key(sheet_id)
+                    workbooks.append({
+                        'id': sheet.id,
+                        'name': sheet.title,
+                        'url': sheet.url,
+                        'modified': 'Unknown'
+                    })
+                    add_log(f"  ✓ Opened: {sheet.title}", "SUCCESS")
+                except Exception as e:
+                    add_log(f"  ✗ Could not open {sheet_id}: {str(e)}", "WARNING")
+            
+            if workbooks:
+                add_log(f"Example spreadsheet method successful: {len(workbooks)} workbook(s)", "SUCCESS")
+                return workbooks
+            
+            # Method 3: List all accessible spreadsheets
+            add_log("Trying to list all accessible spreadsheets...", "INFO")
+            try:
+                all_spreadsheets = self.gc.openall()
+                add_log(f"Found {len(all_spreadsheets)} accessible spreadsheet(s)", "INFO")
+                
+                for sheet in all_spreadsheets:
+                    workbooks.append({
+                        'id': sheet.id,
+                        'name': sheet.title,
+                        'url': sheet.url,
+                        'modified': 'Unknown'
+                    })
+                    add_log(f"  ✓ {sheet.title}", "INFO")
+                
+                if workbooks:
+                    add_log(f"List all method successful: {len(workbooks)} workbook(s)", "SUCCESS")
+                    return workbooks
+                    
+            except Exception as e:
+                add_log(f"List all method failed: {str(e)}", "ERROR")
+            
+            # No workbooks found
+            add_log("No workbooks found with any method", "ERROR")
+            add_log(f"Please ensure folder {folder_id} is shared with: {st.session_state.service_account_email}", "WARNING")
+            add_log("Or add spreadsheet IDs manually below", "INFO")
+            
+            return []
                 
         except Exception as e:
-            add_log(f"Error listing workbooks from folder: {str(e)}", "ERROR")
+            add_log(f"Error listing workbooks: {str(e)}", "ERROR")
             return []
     
-    def _list_workbooks_fallback(self, folder_id: str) -> List[Dict]:
-        """Fallback method to list workbooks using gspread"""
+    def open_workbook_by_id(self, workbook_id: str):
+        """Open a specific workbook by ID (for manual entry)"""
         try:
-            add_log("Using gspread fallback method to list spreadsheets...", "INFO")
+            add_log(f"Opening workbook by ID: {workbook_id}", "INFO")
+            workbook = self.gc.open_by_key(workbook_id)
+            add_log(f"Successfully opened: {workbook.title}", "SUCCESS")
             
-            all_spreadsheets = self.gc.openall()
-            add_log(f"Found {len(all_spreadsheets)} accessible spreadsheet(s)", "INFO")
-            
-            workbooks = []
-            for sheet in all_spreadsheets:
-                workbook_info = {
-                    'id': sheet.id,
-                    'name': sheet.title,
-                    'url': sheet.url,
+            # Add to workbooks list if not already there
+            if not any(wb['id'] == workbook_id for wb in st.session_state.workbooks):
+                st.session_state.workbooks.append({
+                    'id': workbook.id,
+                    'name': workbook.title,
+                    'url': workbook.url,
                     'modified': 'Unknown'
-                }
-                workbooks.append(workbook_info)
-                add_log(f"  ✓ {sheet.title} (ID: {sheet.id})", "INFO")
+                })
+                add_log(f"Added {workbook.title} to workbooks list", "SUCCESS")
             
-            if len(workbooks) > 0:
-                add_log(f"Fallback method found {len(workbooks)} workbook(s)", "SUCCESS")
-            else:
-                add_log("No accessible spreadsheets found", "WARNING")
-            
-            return workbooks
-            
+            return workbook
         except Exception as e:
-            add_log(f"Fallback method also failed: {str(e)}", "ERROR")
-            return []
+            add_log(f"Error opening workbook by ID: {str(e)}", "ERROR")
+            return None
     
     def open_workbook(self, workbook_id: str):
         """Open a specific workbook by ID"""
@@ -679,7 +704,10 @@ def main_app():
                 add_log("Refreshing workbook list...", "INFO")
                 with st.spinner("Refreshing..."):
                     st.session_state.workbooks = manager.list_workbooks_from_folder(DRIVE_FOLDER_ID)
-                st.success(f"✅ Found {len(st.session_state.workbooks)} workbooks!")
+                if st.session_state.workbooks:
+                    st.success(f"✅ Found {len(st.session_state.workbooks)} workbooks!")
+                else:
+                    st.warning("⚠️ No workbooks found")
                 st.rerun()
         
         with col2:
@@ -694,7 +722,36 @@ def main_app():
         
         st.markdown("---")
         
+        with st.expander("➕ Add Spreadsheet by ID"):
+            st.markdown("""
+            <div class="info-box">
+                <p style="margin: 0;">If automatic loading fails, paste a spreadsheet ID here:</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            manual_id = st.text_input(
+                "Spreadsheet ID",
+                placeholder="1ge6-Rzor5jbQ7zaaQk3B7I0Vx31Nv80QH6zW2NfBUz8",
+                help="Get the ID from the spreadsheet URL"
+            )
+            
+            if st.button("📥 Add Spreadsheet", use_container_width=True):
+                if manual_id:
+                    with st.spinner("Opening spreadsheet..."):
+                        wb = manager.open_workbook_by_id(manual_id.strip())
+                        if wb:
+                            st.success(f"✅ Added: {wb.title}")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to open spreadsheet")
+                else:
+                    st.warning("⚠️ Please enter a spreadsheet ID")
+        
+        st.markdown("---")
+        
         if st.session_state.workbooks:
+            st.success(f"📊 {len(st.session_state.workbooks)} workbook(s) available")
+            
             workbook_names = [wb['name'] for wb in st.session_state.workbooks]
             selected_workbook_name = st.selectbox(
                 "Select Workbook",
@@ -721,31 +778,11 @@ def main_app():
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            st.warning("⚠️ No workbooks found in the folder")
-            st.info("Make sure the Google Drive folder is shared with your service account email")
+            st.warning("⚠️ No workbooks loaded")
+            st.info("Click 'Refresh' or add a spreadsheet ID manually above")
         
         st.markdown("---")
-        
-        # View selector
-        view_mode = st.radio(
-            "📑 View Mode",
-            ["Dashboard", "All Sheets Viewer", "Calendar View", "Booking Manager", "System Logs"],
-            help="Choose what to display"
-        )
-        
-        st.markdown("---")
-        
-        # Connection info
-        if st.session_state.service_account_email:
-            st.markdown(f"""
-            <div class="sidebar-card">
-                <h3>🟢 Connected</h3>
-                <p class="highlight">Service Account</p>
-                <p style="font-size: 0.75rem; word-break: break-all;">{st.session_state.service_account_email}</p>
-                <p class="highlight">Workbooks: {len(st.session_state.workbooks)}</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
+
     # Main content area
     if not st.session_state.current_workbook:
         st.info("👈 Please select a workbook from the sidebar to begin")
@@ -756,6 +793,25 @@ def main_app():
     if not workbook:
         st.error("❌ Failed to load workbook")
         return
+    
+    view_mode = st.radio(
+        "📑 View Mode",
+        ["Dashboard", "All Sheets Viewer", "Calendar View", "Booking Manager", "System Logs"],
+        help="Choose what to display"
+    )
+    
+    st.markdown("---")
+    
+    # Connection info
+    if st.session_state.service_account_email:
+        st.markdown(f"""
+        <div class="sidebar-card">
+            <h3>🟢 Connected</h3>
+            <p class="highlight">Service Account</p>
+            <p style="font-size: 0.75rem; word-break: break-all;">{st.session_state.service_account_email}</p>
+            <p class="highlight">Workbooks: {len(st.session_state.workbooks)}</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     if view_mode == "Dashboard":
         render_dashboard(manager, workbook)
