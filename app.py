@@ -1,829 +1,459 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, timedelta
 import pandas as pd
+from datetime import datetime
 import json
-from typing import List, Dict, Optional, Tuple
-import plotly.express as px
-import plotly.graph_objects as go
 
 # Page configuration
 st.set_page_config(
-    page_title="Booking Management System",
+    page_title="Booking Manager",
     page_icon="📅",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1f77b4;
-        margin-bottom: 1rem;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .status-badge {
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-weight: 600;
-        font-size: 0.85rem;
-        display: inline-block;
-    }
-    .sidebar-card {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #1f77b4;
-        margin-bottom: 1rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Initialize session state
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'gc' not in st.session_state:
+    st.session_state.gc = None
+if 'workbooks' not in st.session_state:
+    st.session_state.workbooks = []
+if 'selected_workbook' not in st.session_state:
+    st.session_state.selected_workbook = None
+if 'logs' not in st.session_state:
+    st.session_state.logs = []
 
-# <CHANGE> Added Google Drive API scope and folder configuration
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive.readonly'  # Added Drive API scope
-]
+def log_activity(message):
+    """Add activity to logs"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.session_state.logs.append(f"[{timestamp}] {message}")
 
-# Status code definitions
-STATUS_CODES = {
-    'CI': {'name': 'Check In', 'color': '#28a745', 'description': 'Guest checking in'},
-    'SO': {'name': 'Stay Over', 'color': '#17a2b8', 'description': 'Guest staying, no cleaning'},
-    'CO/CI': {'name': 'Check Out/Check In', 'color': '#fd7e14', 'description': 'Same day turnover'},
-    'FU': {'name': 'Follow Up', 'color': '#ffc107', 'description': 'Follow up required'},
-    'DC': {'name': 'Deep Clean', 'color': '#6f42c1', 'description': 'Deep cleaning service'},
-    'COC': {'name': 'Check Out Clean', 'color': '#e83e8c', 'description': 'Check out cleaning'},
-    'CO': {'name': 'Check Out', 'color': '#dc3545', 'description': 'Guest checking out'}
-}
-
-class BookingManager:
-    def __init__(self):
-        self.client = None
-        self.current_workbook = None
-        self.workbooks = []
-        # <CHANGE> Added folder_id attribute
-        self.folder_id = None
+def authenticate_google_sheets(credentials_dict, folder_id=None):
+    """Authenticate with Google Sheets and Drive API using service account"""
+    try:
+        scopes = [
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive.readonly'
+        ]
         
-    def authenticate(self, credentials_dict: dict, folder_id: str = None) -> bool:
-        """Authenticate with Google Sheets and Drive API"""
-        try:
-            creds = Credentials.from_service_account_info(
-                credentials_dict,
-                scopes=SCOPES
-            )
-            self.client = gspread.authorize(creds)
-            self.folder_id = folder_id  # <CHANGE> Store folder ID
-            self.log_activity("Authentication successful")
-            return True
-        except Exception as e:
-            st.error(f"Authentication failed: {str(e)}")
-            self.log_activity(f"Authentication failed: {str(e)}", "ERROR")
-            return False
-    
-    # <CHANGE> Completely rewrote list_workbooks to pull from Google Drive folder
-    def list_workbooks(self) -> List[Dict]:
-        """List all spreadsheets from Google Drive folder"""
-        if not self.client:
-            return []
+        creds = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
+        gc = gspread.authorize(creds)
         
-        try:
-            if self.folder_id:
-                # Query spreadsheets from specific folder
-                query = f"'{self.folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
-                files = self.client.list_spreadsheet_files(query=query)
-            else:
-                # List all accessible spreadsheets
-                files = self.client.list_spreadsheet_files()
-            
-            self.workbooks = []
-            for file in files:
-                try:
-                    workbook = self.client.open_by_key(file['id'])
-                    self.workbooks.append({
-                        'id': file['id'],
-                        'name': file['name'],
-                        'workbook': workbook,
-                        'url': f"https://docs.google.com/spreadsheets/d/{file['id']}"
-                    })
-                except Exception as e:
-                    self.log_activity(f"Error loading workbook {file['name']}: {str(e)}", "WARNING")
-                    continue
-            
-            self.log_activity(f"Loaded {len(self.workbooks)} workbooks from {'folder' if self.folder_id else 'Drive'}")
-            return self.workbooks
-            
-        except Exception as e:
-            st.error(f"Error listing workbooks: {str(e)}")
-            self.log_activity(f"Error listing workbooks: {str(e)}", "ERROR")
-            return []
-    
-    def load_workbook(self, workbook_id: str) -> bool:
-        """Load a specific workbook"""
-        try:
-            workbook_data = next((wb for wb in self.workbooks if wb['id'] == workbook_id), None)
-            if workbook_data:
-                self.current_workbook = workbook_data['workbook']
-                self.log_activity(f"Loaded workbook: {workbook_data['name']}")
-                return True
-            return False
-        except Exception as e:
-            st.error(f"Error loading workbook: {str(e)}")
-            self.log_activity(f"Error loading workbook: {str(e)}", "ERROR")
-            return False
-    
-    def get_client_profile(self) -> Dict:
-        """Extract client profile from first sheet"""
-        if not self.current_workbook:
-            return {}
-        
-        try:
-            profile_sheet = self.current_workbook.get_worksheet(0)
-            all_values = profile_sheet.get_all_values()
-            
-            profile = {
-                'client_name': '',
-                'properties': [],
-                'contact_info': {},
-                'notes': ''
-            }
-            
-            # Parse client profile data
-            for i, row in enumerate(all_values):
-                if not row or not any(row):
-                    continue
-                
-                # Look for client name
-                if 'client' in str(row[0]).lower() and len(row) > 1:
-                    profile['client_name'] = row[1]
-                
-                # Look for property information
-                if 'property' in str(row[0]).lower() and len(row) > 1:
-                    if row[1]:
-                        profile['properties'].append(row[1])
-                
-                # Look for contact info
-                if any(term in str(row[0]).lower() for term in ['email', 'phone', 'address']):
-                    if len(row) > 1 and row[1]:
-                        profile['contact_info'][row[0]] = row[1]
-            
-            return profile
-            
-        except Exception as e:
-            self.log_activity(f"Error reading client profile: {str(e)}", "ERROR")
-            return {}
-    
-    def get_calendar_sheets(self) -> List[Dict]:
-        """Get all calendar sheets (excluding first profile sheet)"""
-        if not self.current_workbook:
-            return []
-        
-        try:
-            worksheets = self.current_workbook.worksheets()
-            calendars = []
-            
-            for sheet in worksheets[1:]:  # Skip first sheet (profile)
-                calendars.append({
-                    'name': sheet.title,
-                    'sheet': sheet,
-                    'id': sheet.id
-                })
-            
-            return calendars
-            
-        except Exception as e:
-            self.log_activity(f"Error getting calendar sheets: {str(e)}", "ERROR")
-            return []
-    
-    def get_bookings_from_sheet(self, sheet, property_filter: str = None, status_filter: str = None) -> pd.DataFrame:
-        """Extract bookings from a calendar sheet starting at row 13"""
-        try:
-            all_values = sheet.get_all_values()
-            
-            if len(all_values) < 13:
-                return pd.DataFrame()
-            
-            # Get headers from row 12 (index 11)
-            headers = all_values[11] if len(all_values) > 11 else []
-            
-            # Get data starting from row 13 (index 12)
-            data_rows = all_values[12:]
-            
-            if not headers or not data_rows:
-                return pd.DataFrame()
-            
-            # Create DataFrame
-            df = pd.DataFrame(data_rows, columns=headers)
-            
-            # Clean up empty rows
-            df = df[df.apply(lambda row: any(row.astype(str).str.strip() != ''), axis=1)]
-            
-            # Apply filters
-            if property_filter and 'Property' in df.columns:
-                df = df[df['Property'].str.contains(property_filter, case=False, na=False)]
-            
-            if status_filter and 'Status' in df.columns:
-                df = df[df['Status'] == status_filter]
-            
-            # Add sheet name as source
-            df['Calendar'] = sheet.title
-            
-            return df
-            
-        except Exception as e:
-            self.log_activity(f"Error reading bookings from {sheet.title}: {str(e)}", "ERROR")
-            return pd.DataFrame()
-    
-    def get_all_bookings(self, property_filter: str = None, status_filter: str = None) -> pd.DataFrame:
-        """Get all bookings from all calendar sheets"""
-        all_bookings = []
-        
-        for calendar in self.get_calendar_sheets():
-            bookings = self.get_bookings_from_sheet(
-                calendar['sheet'],
-                property_filter,
-                status_filter
-            )
-            if not bookings.empty:
-                all_bookings.append(bookings)
-        
-        if all_bookings:
-            return pd.concat(all_bookings, ignore_index=True)
-        return pd.DataFrame()
-    
-    def add_booking(self, sheet, booking_data: Dict) -> bool:
-        """Add a new booking to a calendar sheet"""
-        try:
-            all_values = sheet.get_all_values()
-            
-            if len(all_values) < 13:
-                st.error("Sheet structure is invalid (needs at least 13 rows)")
-                return False
-            
-            headers = all_values[11]
-            
-            # Find next empty row
-            next_row = len(all_values) + 1
-            
-            # Prepare row data matching headers
-            row_data = []
-            for header in headers:
-                row_data.append(booking_data.get(header, ''))
-            
-            # Append the row
-            sheet.append_row(row_data)
-            
-            self.log_activity(f"Added booking to {sheet.title}")
-            return True
-            
-        except Exception as e:
-            st.error(f"Error adding booking: {str(e)}")
-            self.log_activity(f"Error adding booking: {str(e)}", "ERROR")
-            return False
-    
-    def log_activity(self, message: str, level: str = "INFO"):
-        """Log activity to session state"""
-        if 'activity_log' not in st.session_state:
-            st.session_state.activity_log = []
-        
-        log_entry = {
-            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'level': level,
-            'message': message
-        }
-        st.session_state.activity_log.insert(0, log_entry)
-        
-        # Keep only last 100 entries
-        st.session_state.activity_log = st.session_state.activity_log[:100]
-
-def render_status_badge(status_code: str) -> str:
-    """Render a colored status badge"""
-    if status_code in STATUS_CODES:
-        info = STATUS_CODES[status_code]
-        return f'<span class="status-badge" style="background-color: {info["color"]}; color: white;">{status_code} - {info["name"]}</span>'
-    return f'<span class="status-badge" style="background-color: #6c757d; color: white;">{status_code}</span>'
-
-def main():
-    st.markdown('<h1 class="main-header">📅 Booking Management System</h1>', unsafe_allow_html=True)
-    
-    # Initialize session state
-    if 'manager' not in st.session_state:
-        st.session_state.manager = BookingManager()
-    if 'authenticated' not in st.session_state:
-        st.session_state.authenticated = False
-    if 'current_view' not in st.session_state:
-        st.session_state.current_view = 'Dashboard'
-    
-    manager = st.session_state.manager
-    
-    # Sidebar
-    with st.sidebar:
-        st.markdown("### 🔐 Authentication")
-        
-        # <CHANGE> Added folder ID input field
-        st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-        st.markdown("**Google Drive Folder**")
-        folder_id_input = st.text_input(
-            "Folder ID (optional)",
-            value=st.session_state.get('folder_id', ''),
-            help="Enter the Google Drive folder ID to filter spreadsheets. Leave empty to show all accessible sheets.",
-            placeholder="e.g., 1a2b3c4d5e6f7g8h9i0j"
-        )
-        
-        if folder_id_input:
-            st.session_state.folder_id = folder_id_input
-            st.info("📁 Will load sheets from specified folder")
+        # Get workbooks from folder or all accessible
+        if folder_id:
+            log_activity(f"Loading workbooks from folder: {folder_id}")
+            workbooks = gc.list_spreadsheet_files(folder_id=folder_id)
         else:
-            st.session_state.folder_id = None
-            st.info("📂 Will load all accessible sheets")
+            log_activity("Loading all accessible workbooks")
+            workbooks = gc.openall()
+            workbooks = [{'id': wb.id, 'name': wb.title} for wb in workbooks]
         
-        st.markdown('</div>', unsafe_allow_html=True)
+        log_activity(f"Successfully loaded {len(workbooks)} workbook(s)")
+        return gc, workbooks
+    except Exception as e:
+        log_activity(f"Authentication error: {str(e)}")
+        st.error(f"Authentication failed: {str(e)}")
+        return None, []
+
+def load_client_profile(workbook):
+    """Load client profile from first sheet"""
+    try:
+        first_sheet = workbook.get_worksheet(0)
+        data = first_sheet.get_all_values()
         
-        # Credentials input
-        credentials_input = st.text_area(
-            "Service Account JSON",
-            height=150,
-            help="Paste your Google Service Account credentials JSON here"
-        )
+        profile = {}
+        for row in data[:20]:  # Check first 20 rows for profile data
+            if len(row) >= 2 and row[0]:
+                key = row[0].strip()
+                value = row[1].strip() if len(row) > 1 else ""
+                if key and value:
+                    profile[key] = value
         
-        if st.button("🔓 Authenticate", use_container_width=True):
-            if credentials_input:
-                try:
-                    creds_dict = json.loads(credentials_input)
-                    # <CHANGE> Pass folder_id to authenticate
-                    if manager.authenticate(creds_dict, st.session_state.get('folder_id')):
-                        st.session_state.authenticated = True
-                        st.success("✅ Authenticated successfully!")
-                        st.rerun()
-                except json.JSONDecodeError:
-                    st.error("Invalid JSON format")
-            else:
-                st.warning("Please enter credentials")
+        log_activity(f"Loaded client profile with {len(profile)} fields")
+        return profile
+    except Exception as e:
+        log_activity(f"Error loading client profile: {str(e)}")
+        return {}
+
+def load_calendar_data(workbook, sheet_index):
+    """Load booking calendar data from a specific sheet (starting from row 13)"""
+    try:
+        sheet = workbook.get_worksheet(sheet_index)
+        sheet_name = sheet.title
         
-        if st.session_state.authenticated:
-            st.success("✅ Authenticated")
-            
-            # <CHANGE> Added refresh button for workbooks
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("🔄 Refresh", use_container_width=True):
-                    with st.spinner("Loading workbooks..."):
-                        manager.list_workbooks()
-                    st.rerun()
-            with col2:
-                if st.button("🚪 Logout", use_container_width=True):
-                    st.session_state.authenticated = False
-                    st.session_state.manager = BookingManager()
-                    st.rerun()
-            
-            st.markdown("---")
-            
-            # Workbook selection
-            if not manager.workbooks:
-                with st.spinner("Loading workbooks from Drive..."):
-                    manager.list_workbooks()
-            
-            if manager.workbooks:
-                st.markdown("### 📚 Select Workbook")
-                
-                # <CHANGE> Enhanced workbook display with count
-                st.info(f"Found {len(manager.workbooks)} workbook(s)")
-                
-                workbook_names = [wb['name'] for wb in manager.workbooks]
-                selected_workbook_name = st.selectbox(
-                    "Client Workbook",
-                    workbook_names,
-                    key="workbook_selector"
-                )
-                
-                if selected_workbook_name:
-                    selected_wb = next(wb for wb in manager.workbooks if wb['name'] == selected_workbook_name)
-                    
-                    if st.session_state.get('current_workbook_id') != selected_wb['id']:
-                        manager.load_workbook(selected_wb['id'])
-                        st.session_state.current_workbook_id = selected_wb['id']
-                        st.rerun()
-                    
-                    # Display workbook info
-                    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-                    st.markdown(f"**Current Workbook:**")
-                    st.markdown(f"📄 {selected_wb['name']}")
-                    st.markdown(f"[Open in Google Sheets]({selected_wb['url']})")
-                    st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.warning("No workbooks found. Check your folder ID or permissions.")
-            
-            st.markdown("---")
-            
-            # Navigation
-            st.markdown("### 🧭 Navigation")
-            views = ['Dashboard', 'Calendar View', 'Booking Manager', 'Analytics', 'System Logs']
-            st.session_state.current_view = st.radio("Go to", views, key="nav_radio")
-            
-            # Status code legend
-            st.markdown("---")
-            st.markdown("### 📋 Status Codes")
-            for code, info in STATUS_CODES.items():
-                st.markdown(
-                    f'<div style="margin: 0.5rem 0;">{render_status_badge(code)}</div>',
-                    unsafe_allow_html=True
-                )
+        # Get all data
+        all_data = sheet.get_all_values()
+        
+        if len(all_data) < 13:
+            return pd.DataFrame(), sheet_name
+        
+        # Headers are in row 12 (index 11), data starts at row 13 (index 12)
+        headers = all_data[11]
+        data_rows = all_data[12:]
+        
+        # Create DataFrame
+        df = pd.DataFrame(data_rows, columns=headers)
+        
+        # Remove empty rows
+        df = df[df.iloc[:, 0].str.strip() != '']
+        
+        log_activity(f"Loaded {len(df)} bookings from sheet: {sheet_name}")
+        return df, sheet_name
+    except Exception as e:
+        log_activity(f"Error loading calendar data: {str(e)}")
+        return pd.DataFrame(), "Unknown"
+
+def get_all_properties(profile):
+    """Extract property names from client profile"""
+    properties = []
+    for key, value in profile.items():
+        if 'property' in key.lower() or 'address' in key.lower():
+            if value and value not in properties:
+                properties.append(value)
+    return properties
+
+def get_status_color(status):
+    """Return color for status badge"""
+    colors = {
+        'CI': '#4CAF50',    # Green - Check In
+        'SO': '#2196F3',    # Blue - Stay Over
+        'CO/CI': '#FF9800', # Orange - Check Out/Check In
+        'FU': '#9C27B0',    # Purple - Follow Up
+        'DC': '#F44336',    # Red - Deep Clean
+        'COC': '#00BCD4',   # Cyan - Check Out Clean
+        'CO': '#FF5722'     # Deep Orange - Check Out
+    }
+    return colors.get(status, '#757575')
+
+# Main App
+st.title("📅 Booking Management System")
+
+# Sidebar
+with st.sidebar:
+    st.header("🔐 Authentication")
     
-    # Main content area
-    if not st.session_state.authenticated:
-        st.info("👈 Please authenticate using the sidebar to get started")
+    # <CHANGE> Only JSON file upload authentication
+    uploaded_file = st.file_uploader(
+        "Upload Service Account JSON",
+        type=['json'],
+        help="Upload your Google Service Account credentials JSON file"
+    )
+    
+    folder_id = st.text_input(
+        "Google Drive Folder ID (Optional)",
+        help="Enter folder ID to load workbooks from a specific folder. Leave empty to load all accessible workbooks."
+    )
+    
+    if uploaded_file is not None:
+        if st.button("🔓 Authenticate", type="primary"):
+            try:
+                credentials_dict = json.load(uploaded_file)
+                gc, workbooks = authenticate_google_sheets(credentials_dict, folder_id if folder_id else None)
+                
+                if gc and workbooks:
+                    st.session_state.authenticated = True
+                    st.session_state.gc = gc
+                    st.session_state.workbooks = workbooks
+                    st.success("✅ Authentication successful!")
+                    st.rerun()
+                else:
+                    st.error("❌ No workbooks found")
+            except json.JSONDecodeError:
+                st.error("❌ Invalid JSON file")
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+    
+    if st.session_state.authenticated:
+        st.success("✅ Authenticated")
         
-        # <CHANGE> Added instructions for folder ID
-        st.markdown("### 📖 Getting Started")
+        if st.button("🔄 Refresh Workbooks"):
+            try:
+                if folder_id:
+                    workbooks = st.session_state.gc.list_spreadsheet_files(folder_id=folder_id)
+                else:
+                    workbooks = st.session_state.gc.openall()
+                    workbooks = [{'id': wb.id, 'name': wb.title} for wb in workbooks]
+                
+                st.session_state.workbooks = workbooks
+                log_activity(f"Refreshed workbooks: {len(workbooks)} found")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error refreshing: {str(e)}")
+        
+        st.divider()
+        
+        # Workbook selector
+        if st.session_state.workbooks:
+            st.subheader("📚 Select Workbook")
+            workbook_names = [wb['name'] for wb in st.session_state.workbooks]
+            selected_name = st.selectbox("Client Workbook", workbook_names)
+            
+            if selected_name:
+                selected_wb = next(wb for wb in st.session_state.workbooks if wb['name'] == selected_name)
+                st.session_state.selected_workbook = selected_wb
+                
+                st.info(f"📖 **{selected_name}**")
+        else:
+            st.warning("No workbooks found")
+        
+        if st.button("🚪 Logout"):
+            st.session_state.authenticated = False
+            st.session_state.gc = None
+            st.session_state.workbooks = []
+            st.session_state.selected_workbook = None
+            st.rerun()
+
+# Main content
+if not st.session_state.authenticated:
+    st.info("👈 Please upload your service account JSON file and authenticate to begin")
+    
+    with st.expander("ℹ️ How to get started"):
         st.markdown("""
-        1. **Get your Google Drive Folder ID** (optional):
-           - Open your Google Drive folder in a browser
-           - Copy the folder ID from the URL: `https://drive.google.com/drive/folders/YOUR_FOLDER_ID`
-           - Paste it in the sidebar
-           
-        2. **Create a Service Account**:
+        ### Setup Instructions:
+        
+        1. **Create a Google Cloud Service Account**
            - Go to [Google Cloud Console](https://console.cloud.google.com/)
            - Create a new project or select existing
            - Enable Google Sheets API and Google Drive API
            - Create a Service Account and download JSON key
-           
-        3. **Share your folder/sheets**:
-           - Share your Google Drive folder or individual sheets with the service account email
-           - Grant "Viewer" or "Editor" permissions
-           
-        4. **Paste credentials** in the sidebar and click Authenticate
+        
+        2. **Share your Google Sheets**
+           - Open your Google Drive folder with booking workbooks
+           - Share the folder with the service account email (found in JSON file)
+           - Give "Viewer" or "Editor" permissions
+        
+        3. **Get Folder ID (Optional)**
+           - Open your Google Drive folder
+           - Copy the ID from URL: `drive.google.com/drive/folders/FOLDER_ID_HERE`
+        
+        4. **Upload JSON and Authenticate**
+           - Upload the service account JSON file
+           - Optionally enter folder ID
+           - Click Authenticate
         """)
-        
-        st.markdown("### 📊 Expected Sheet Structure")
-        st.markdown("""
-        Each workbook should have:
-        - **First sheet**: Client profile with property details
-        - **Subsequent sheets**: Monthly booking calendars
-        - **Booking data**: Starts at row 13
-        - **Headers**: Located at row 12
-        """)
-        
-        return
-    
-    if not manager.current_workbook:
-        st.warning("Please select a workbook from the sidebar")
-        return
-    
-    # Render selected view
-    if st.session_state.current_view == 'Dashboard':
-        render_dashboard(manager)
-    elif st.session_state.current_view == 'Calendar View':
-        render_calendar_view(manager)
-    elif st.session_state.current_view == 'Booking Manager':
-        render_booking_manager(manager)
-    elif st.session_state.current_view == 'Analytics':
-        render_analytics(manager)
-    elif st.session_state.current_view == 'System Logs':
-        render_system_logs()
 
-def render_dashboard(manager: BookingManager):
-    """Render the dashboard view"""
-    st.markdown("## 📊 Dashboard")
-    
-    # Get client profile
-    profile = manager.get_client_profile()
-    
-    # Display client info
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("### 👤 Client Profile")
-        if profile.get('client_name'):
-            st.markdown(f"**Client:** {profile['client_name']}")
-        
-        if profile.get('properties'):
-            st.markdown("**Properties:**")
-            for prop in profile['properties']:
-                st.markdown(f"- 🏠 {prop}")
-        
-        if profile.get('contact_info'):
-            st.markdown("**Contact Information:**")
-            for key, value in profile['contact_info'].items():
-                st.markdown(f"- **{key}:** {value}")
-    
-    with col2:
-        calendars = manager.get_calendar_sheets()
-        st.metric("📅 Calendar Sheets", len(calendars))
-        st.metric("🏠 Properties", len(profile.get('properties', [])))
-    
-    st.markdown("---")
-    
-    # Get all bookings
-    all_bookings = manager.get_all_bookings()
-    
-    if not all_bookings.empty:
-        # Metrics
-        st.markdown("### 📈 Booking Metrics")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Bookings", len(all_bookings))
-        
-        with col2:
-            if 'Status' in all_bookings.columns:
-                unique_statuses = all_bookings['Status'].nunique()
-                st.metric("Status Types", unique_statuses)
-        
-        with col3:
-            if 'Property' in all_bookings.columns:
-                unique_properties = all_bookings['Property'].nunique()
-                st.metric("Active Properties", unique_properties)
-        
-        with col4:
-            if 'Calendar' in all_bookings.columns:
-                unique_calendars = all_bookings['Calendar'].nunique()
-                st.metric("Calendar Months", unique_calendars)
-        
-        # Status distribution
-        if 'Status' in all_bookings.columns:
-            st.markdown("### 📊 Status Distribution")
-            status_counts = all_bookings['Status'].value_counts()
-            
-            fig = go.Figure(data=[go.Pie(
-                labels=status_counts.index,
-                values=status_counts.values,
-                hole=0.4,
-                marker=dict(colors=[STATUS_CODES.get(s, {}).get('color', '#6c757d') for s in status_counts.index])
-            )])
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Recent bookings
-        st.markdown("### 🕐 Recent Bookings")
-        display_df = all_bookings.head(10)
-        
-        if 'Status' in display_df.columns:
-            display_df['Status'] = display_df['Status'].apply(
-                lambda x: render_status_badge(x) if x in STATUS_CODES else x
-            )
-        
-        st.markdown(display_df.to_html(escape=False, index=False), unsafe_allow_html=True)
-    else:
-        st.info("No bookings found in the current workbook")
+elif not st.session_state.selected_workbook:
+    st.warning("📚 Please select a workbook from the sidebar")
 
-def render_calendar_view(manager: BookingManager):
-    """Render the calendar view"""
-    st.markdown("## 📅 Calendar View")
-    
-    calendars = manager.get_calendar_sheets()
-    
-    if not calendars:
-        st.warning("No calendar sheets found")
-        return
-    
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        selected_calendar = st.selectbox(
-            "Select Calendar",
-            ['All Calendars'] + [cal['name'] for cal in calendars]
-        )
-    
-    with col2:
-        profile = manager.get_client_profile()
-        properties = profile.get('properties', [])
-        property_filter = st.selectbox(
-            "Filter by Property",
-            ['All Properties'] + properties
-        )
-    
-    with col3:
-        status_filter = st.selectbox(
-            "Filter by Status",
-            ['All Statuses'] + list(STATUS_CODES.keys())
-        )
-    
-    # Apply filters
-    prop_filter = None if property_filter == 'All Properties' else property_filter
-    stat_filter = None if status_filter == 'All Statuses' else status_filter
-    
-    if selected_calendar == 'All Calendars':
-        bookings = manager.get_all_bookings(prop_filter, stat_filter)
-    else:
-        calendar = next(cal for cal in calendars if cal['name'] == selected_calendar)
-        bookings = manager.get_bookings_from_sheet(calendar['sheet'], prop_filter, stat_filter)
-    
-    if not bookings.empty:
-        st.markdown(f"### 📋 Showing {len(bookings)} booking(s)")
+else:
+    # Load selected workbook
+    try:
+        workbook = st.session_state.gc.open_by_key(st.session_state.selected_workbook['id'])
         
-        # Display bookings
-        if 'Status' in bookings.columns:
-            bookings_display = bookings.copy()
-            bookings_display['Status'] = bookings_display['Status'].apply(
-                lambda x: render_status_badge(x) if x in STATUS_CODES else x
-            )
-            st.markdown(bookings_display.to_html(escape=False, index=False), unsafe_allow_html=True)
-        else:
-            st.dataframe(bookings, use_container_width=True)
+        # Navigation tabs
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Dashboard",
+            "📅 Calendar View",
+            "➕ Booking Manager",
+            "📈 Analytics",
+            "📋 System Logs"
+        ])
         
-        # Export option
-        csv = bookings.to_csv(index=False)
-        st.download_button(
-            label="📥 Download as CSV",
-            data=csv,
-            file_name=f"bookings_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
-    else:
-        st.info("No bookings match the selected filters")
-
-def render_booking_manager(manager: BookingManager):
-    """Render the booking manager"""
-    st.markdown("## ➕ Booking Manager")
-    
-    calendars = manager.get_calendar_sheets()
-    
-    if not calendars:
-        st.warning("No calendar sheets found")
-        return
-    
-    st.markdown("### Create New Booking")
-    
-    with st.form("new_booking_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            calendar_select = st.selectbox(
-                "Select Calendar *",
-                [cal['name'] for cal in calendars]
-            )
+        with tab1:
+            st.header("📊 Dashboard Overview")
             
-            profile = manager.get_client_profile()
-            properties = profile.get('properties', [''])
-            property_select = st.selectbox("Property *", properties)
+            # Load client profile
+            profile = load_client_profile(workbook)
             
-            status_select = st.selectbox(
-                "Status *",
-                list(STATUS_CODES.keys()),
-                format_func=lambda x: f"{x} - {STATUS_CODES[x]['name']}"
-            )
-        
-        with col2:
-            date_input = st.date_input("Date *")
-            guest_name = st.text_input("Guest Name")
-            notes = st.text_area("Notes")
-        
-        submitted = st.form_submit_button("➕ Add Booking", use_container_width=True)
-        
-        if submitted:
-            calendar = next(cal for cal in calendars if cal['name'] == calendar_select)
+            col1, col2 = st.columns([2, 1])
             
-            booking_data = {
-                'Date': date_input.strftime('%Y-%m-%d'),
-                'Property': property_select,
-                'Status': status_select,
-                'Guest': guest_name,
-                'Notes': notes
-            }
+            with col1:
+                st.subheader("👤 Client Profile")
+                if profile:
+                    for key, value in profile.items():
+                        st.text(f"{key}: {value}")
+                else:
+                    st.info("No profile data found")
             
-            if manager.add_booking(calendar['sheet'], booking_data):
-                st.success("✅ Booking added successfully!")
-                st.balloons()
+            with col2:
+                st.subheader("📈 Quick Stats")
+                
+                # Count total bookings across all calendar sheets
+                total_bookings = 0
+                sheet_count = workbook.worksheet_count - 1  # Exclude profile sheet
+                
+                for i in range(1, workbook.worksheet_count):
+                    df, _ = load_calendar_data(workbook, i)
+                    total_bookings += len(df)
+                
+                st.metric("Total Calendar Sheets", sheet_count)
+                st.metric("Total Bookings", total_bookings)
+                
+                # Properties
+                properties = get_all_properties(profile)
+                st.metric("Properties", len(properties))
+            
+            # Recent bookings preview
+            st.subheader("📅 Recent Bookings Preview")
+            if workbook.worksheet_count > 1:
+                df, sheet_name = load_calendar_data(workbook, 1)
+                if not df.empty:
+                    st.caption(f"From: {sheet_name}")
+                    st.dataframe(df.head(10), use_container_width=True)
+                else:
+                    st.info("No bookings found in first calendar sheet")
+        
+        with tab2:
+            st.header("📅 Calendar View")
+            
+            # Sheet selector
+            sheet_names = [workbook.get_worksheet(i).title for i in range(1, workbook.worksheet_count)]
+            
+            if sheet_names:
+                selected_sheet_name = st.selectbox("Select Month", sheet_names)
+                selected_sheet_index = sheet_names.index(selected_sheet_name) + 1
+                
+                # Load calendar data
+                df, sheet_name = load_calendar_data(workbook, selected_sheet_index)
+                
+                if not df.empty:
+                    # Filters
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Status filter
+                        if 'Status' in df.columns or 'status' in df.columns:
+                            status_col = 'Status' if 'Status' in df.columns else 'status'
+                            statuses = ['All'] + sorted(df[status_col].unique().tolist())
+                            selected_status = st.selectbox("Filter by Status", statuses)
+                    
+                    with col2:
+                        # Property filter
+                        properties = get_all_properties(load_client_profile(workbook))
+                        if properties:
+                            selected_property = st.selectbox("Filter by Property", ['All'] + properties)
+                    
+                    # Apply filters
+                    filtered_df = df.copy()
+                    
+                    if selected_status != 'All':
+                        status_col = 'Status' if 'Status' in df.columns else 'status'
+                        filtered_df = filtered_df[filtered_df[status_col] == selected_status]
+                    
+                    st.subheader(f"📆 {sheet_name}")
+                    st.caption(f"Showing {len(filtered_df)} of {len(df)} bookings")
+                    
+                    # Display with color coding
+                    st.dataframe(filtered_df, use_container_width=True, height=500)
+                    
+                    # Status legend
+                    st.caption("**Status Codes:**")
+                    status_codes = {
+                        'CI': 'Check In',
+                        'SO': 'Stay Over',
+                        'CO/CI': 'Check Out / Check In',
+                        'FU': 'Follow Up',
+                        'DC': 'Deep Clean',
+                        'COC': 'Check Out Clean',
+                        'CO': 'Check Out'
+                    }
+                    
+                    cols = st.columns(7)
+                    for idx, (code, description) in enumerate(status_codes.items()):
+                        with cols[idx]:
+                            st.markdown(f"**{code}** - {description}")
+                else:
+                    st.info("No bookings found in this calendar sheet")
             else:
-                st.error("❌ Failed to add booking")
-
-def render_analytics(manager: BookingManager):
-    """Render analytics view"""
-    st.markdown("## 📊 Analytics & Reports")
-    
-    all_bookings = manager.get_all_bookings()
-    
-    if all_bookings.empty:
-        st.info("No booking data available for analysis")
-        return
-    
-    # Status analysis
-    if 'Status' in all_bookings.columns:
-        st.markdown("### 📈 Status Analysis")
+                st.warning("No calendar sheets found")
         
-        status_counts = all_bookings['Status'].value_counts()
+        with tab3:
+            st.header("➕ Booking Manager")
+            
+            st.info("📝 Create new bookings (Feature in development)")
+            
+            with st.form("new_booking_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    booking_date = st.date_input("Date")
+                    guest_name = st.text_input("Guest Name")
+                    
+                    properties = get_all_properties(load_client_profile(workbook))
+                    property_select = st.selectbox("Property", properties if properties else ["No properties found"])
+                
+                with col2:
+                    status = st.selectbox("Status", ['CI', 'SO', 'CO/CI', 'FU', 'DC', 'COC', 'CO'])
+                    check_in_time = st.time_input("Check-in Time")
+                    check_out_time = st.time_input("Check-out Time")
+                
+                notes = st.text_area("Notes")
+                
+                submitted = st.form_submit_button("Create Booking", type="primary")
+                
+                if submitted:
+                    st.success("✅ Booking creation feature coming soon!")
+                    log_activity(f"Booking form submitted for {guest_name} on {booking_date}")
         
-        col1, col2 = st.columns(2)
+        with tab4:
+            st.header("📈 Analytics & Reports")
+            
+            # Collect all booking data
+            all_bookings = []
+            for i in range(1, workbook.worksheet_count):
+                df, sheet_name = load_calendar_data(workbook, i)
+                if not df.empty:
+                    df['Sheet'] = sheet_name
+                    all_bookings.append(df)
+            
+            if all_bookings:
+                combined_df = pd.concat(all_bookings, ignore_index=True)
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Total Bookings", len(combined_df))
+                
+                with col2:
+                    st.metric("Calendar Sheets", len(all_bookings))
+                
+                with col3:
+                    if 'Status' in combined_df.columns or 'status' in combined_df.columns:
+                        status_col = 'Status' if 'Status' in combined_df.columns else 'status'
+                        unique_statuses = combined_df[status_col].nunique()
+                        st.metric("Unique Statuses", unique_statuses)
+                
+                # Status distribution
+                if 'Status' in combined_df.columns or 'status' in combined_df.columns:
+                    st.subheader("📊 Status Distribution")
+                    status_col = 'Status' if 'Status' in combined_df.columns else 'status'
+                    status_counts = combined_df[status_col].value_counts()
+                    
+                    col1, col2 = st.columns([2, 1])
+                    
+                    with col1:
+                        st.bar_chart(status_counts)
+                    
+                    with col2:
+                        for status, count in status_counts.items():
+                            percentage = (count / len(combined_df)) * 100
+                            st.markdown(f"**{status}**: {count} ({percentage:.1f}%)")
+                
+                # Export option
+                st.subheader("💾 Export Data")
+                csv = combined_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download All Bookings as CSV",
+                    data=csv,
+                    file_name=f"bookings_export_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No booking data available for analytics")
         
-        with col1:
-            fig = px.bar(
-                x=status_counts.index,
-                y=status_counts.values,
-                labels={'x': 'Status', 'y': 'Count'},
-                title='Bookings by Status',
-                color=status_counts.index,
-                color_discrete_map={s: STATUS_CODES.get(s, {}).get('color', '#6c757d') for s in status_counts.index}
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            fig = go.Figure(data=[go.Pie(
-                labels=status_counts.index,
-                values=status_counts.values,
-                hole=0.4
-            )])
-            fig.update_layout(title='Status Distribution')
-            st.plotly_chart(fig, use_container_width=True)
+        with tab5:
+            st.header("📋 System Activity Logs")
+            
+            if st.session_state.logs:
+                st.text_area("Activity Log", "\n".join(reversed(st.session_state.logs[-50:])), height=400)
+                
+                if st.button("🗑️ Clear Logs"):
+                    st.session_state.logs = []
+                    st.rerun()
+            else:
+                st.info("No activity logged yet")
     
-    # Property analysis
-    if 'Property' in all_bookings.columns:
-        st.markdown("### 🏠 Property Analysis")
-        
-        property_counts = all_bookings['Property'].value_counts()
-        
-        fig = px.bar(
-            x=property_counts.index,
-            y=property_counts.values,
-            labels={'x': 'Property', 'y': 'Bookings'},
-            title='Bookings by Property'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Calendar analysis
-    if 'Calendar' in all_bookings.columns:
-        st.markdown("### 📅 Monthly Analysis")
-        
-        calendar_counts = all_bookings['Calendar'].value_counts()
-        
-        fig = px.line(
-            x=calendar_counts.index,
-            y=calendar_counts.values,
-            labels={'x': 'Month', 'y': 'Bookings'},
-            title='Bookings by Month',
-            markers=True
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Export analytics
-    st.markdown("### 📥 Export Data")
-    csv = all_bookings.to_csv(index=False)
-    st.download_button(
-        label="Download Full Dataset",
-        data=csv,
-        file_name=f"booking_analytics_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv"
-    )
-
-def render_system_logs():
-    """Render system logs"""
-    st.markdown("## 📋 System Logs")
-    
-    if 'activity_log' not in st.session_state or not st.session_state.activity_log:
-        st.info("No activity logged yet")
-        return
-    
-    # Filter options
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        search_term = st.text_input("🔍 Search logs", "")
-    
-    with col2:
-        level_filter = st.selectbox("Level", ['All', 'INFO', 'WARNING', 'ERROR'])
-    
-    # Display logs
-    logs = st.session_state.activity_log
-    
-    if level_filter != 'All':
-        logs = [log for log in logs if log['level'] == level_filter]
-    
-    if search_term:
-        logs = [log for log in logs if search_term.lower() in log['message'].lower()]
-    
-    st.markdown(f"### Showing {len(logs)} log entries")
-    
-    for log in logs:
-        level_color = {
-            'INFO': '#17a2b8',
-            'WARNING': '#ffc107',
-            'ERROR': '#dc3545'
-        }.get(log['level'], '#6c757d')
-        
-        st.markdown(
-            f"""
-            <div style="padding: 0.75rem; margin: 0.5rem 0; border-left: 4px solid {level_color}; background: #f8f9fa; border-radius: 4px;">
-                <strong style="color: {level_color};">[{log['level']}]</strong> 
-                <span style="color: #6c757d;">{log['timestamp']}</span><br/>
-                {log['message']}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    
-    # Clear logs button
-    if st.button("🗑️ Clear All Logs"):
-        st.session_state.activity_log = []
-        st.rerun()
-
-if __name__ == "__main__":
-    main()
+    except Exception as e:
+        st.error(f"Error loading workbook: {str(e)}")
+        log_activity(f"Error loading workbook: {str(e)}")
