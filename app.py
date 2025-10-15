@@ -55,6 +55,7 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 1px;
     }
+    /* Updated all info boxes to have black text */
     .info-box {
         background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
         padding: 1.5rem;
@@ -62,6 +63,10 @@ st.markdown("""
         border-left: 5px solid #667eea;
         margin: 1.5rem 0;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        color: #000000;
+    }
+    .info-box h2, .info-box h3, .info-box h4, .info-box p, .info-box strong {
+        color: #000000 !important;
     }
     .warning-box {
         background: linear-gradient(135deg, #fff9e6 0%, #ffe8b3 100%);
@@ -70,6 +75,10 @@ st.markdown("""
         border-left: 5px solid #ffc107;
         margin: 1.5rem 0;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        color: #000000;
+    }
+    .warning-box h2, .warning-box h3, .warning-box h4, .warning-box p, .warning-box strong {
+        color: #000000 !important;
     }
     .success-box {
         background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
@@ -78,6 +87,10 @@ st.markdown("""
         border-left: 5px solid #28a745;
         margin: 1.5rem 0;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        color: #000000;
+    }
+    .success-box h2, .success-box h3, .success-box h4, .success-box p, .success-box strong {
+        color: #000000 !important;
     }
     .error-box {
         background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
@@ -86,7 +99,12 @@ st.markdown("""
         border-left: 5px solid #f44336;
         margin: 1.5rem 0;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        color: #000000;
     }
+    .error-box h2, .error-box h3, .error-box h4, .error-box p, .error-box strong {
+        color: #000000 !important;
+    }
+    /* Updated metric cards to have black text */
     .metric-card {
         background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
         padding: 2rem;
@@ -95,10 +113,14 @@ st.markdown("""
         text-align: center;
         border: 2px solid #e9ecef;
         transition: transform 0.3s ease;
+        color: #000000;
     }
     .metric-card:hover {
         transform: translateY(-5px);
         box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    }
+    .metric-card h1, .metric-card h2, .metric-card h3, .metric-card h4, .metric-card p, .metric-card strong {
+        color: #000000 !important;
     }
     .sidebar-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -167,6 +189,7 @@ st.markdown("""
         color: white;
         box-shadow: 0 6px 12px rgba(0,0,0,0.2);
     }
+    /* Updated property cards to have black text */
     .property-card {
         background: white;
         padding: 1.5rem;
@@ -175,10 +198,14 @@ st.markdown("""
         margin: 1rem 0;
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         transition: all 0.3s ease;
+        color: #000000;
     }
     .property-card:hover {
         border-color: #667eea;
         box-shadow: 0 6px 12px rgba(102, 126, 234, 0.3);
+    }
+    .property-card h1, .property-card h2, .property-card h3, .property-card h4, .property-card p, .property-card strong {
+        color: #000000 !important;
     }
     .sheet-selector {
         background: #f8f9fa;
@@ -313,34 +340,42 @@ class BookingManager:
             
             workbooks = []
             
-            # Method 1: Try Drive API
             try:
                 from googleapiclient.discovery import build
                 from googleapiclient.errors import HttpError
                 add_log("Attempting Drive API method...", "INFO")
                 
                 drive_service = build('drive', 'v3', credentials=self.creds)
+                
+                # Query for all spreadsheets in the folder
                 query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
                 
-                results = drive_service.files().list(
-                    q=query,
-                    pageSize=100,
-                    fields="files(id, name, webViewLink, modifiedTime)",
-                    supportsAllDrives=True,
-                    includeItemsFromAllDrives=True
-                ).execute()
-                
-                files = results.get('files', [])
-                add_log(f"Drive API found {len(files)} file(s)", "INFO")
-                
-                for file in files:
-                    workbooks.append({
-                        'id': file['id'],
-                        'name': file['name'],
-                        'url': file.get('webViewLink', f"https://docs.google.com/spreadsheets/d/{file['id']}"),
-                        'modified': file.get('modifiedTime', 'Unknown')
-                    })
-                    add_log(f"  ✓ {file['name']}", "SUCCESS")
+                page_token = None
+                while True:
+                    results = drive_service.files().list(
+                        q=query,
+                        pageSize=100,
+                        fields="nextPageToken, files(id, name, webViewLink, modifiedTime)",
+                        supportsAllDrives=True,
+                        includeItemsFromAllDrives=True,
+                        pageToken=page_token
+                    ).execute()
+                    
+                    files = results.get('files', [])
+                    add_log(f"Drive API found {len(files)} file(s) in this page", "INFO")
+                    
+                    for file in files:
+                        workbooks.append({
+                            'id': file['id'],
+                            'name': file['name'],
+                            'url': file.get('webViewLink', f"https://docs.google.com/spreadsheets/d/{file['id']}"),
+                            'modified': file.get('modifiedTime', 'Unknown')
+                        })
+                        add_log(f"  ✓ {file['name']}", "SUCCESS")
+                    
+                    page_token = results.get('nextPageToken')
+                    if not page_token:
+                        break
                 
                 if workbooks:
                     add_log(f"Drive API method successful: {len(workbooks)} workbook(s)", "SUCCESS")
@@ -528,12 +563,23 @@ class BookingManager:
             
             # Get headers (row before start_row)
             headers = all_values[start_row - 2] if start_row > 1 else all_values[0]
-            add_log(f"Headers: {', '.join([h for h in headers if h])}", "INFO")
+            
+            seen = {}
+            unique_headers = []
+            for header in headers:
+                if header in seen:
+                    seen[header] += 1
+                    unique_headers.append(f"{header}_{seen[header]}")
+                else:
+                    seen[header] = 0
+                    unique_headers.append(header)
+            
+            add_log(f"Headers: {', '.join([h for h in unique_headers if h])}", "INFO")
             
             # Get data starting from start_row
             data = all_values[start_row - 1:]
             
-            df = pd.DataFrame(data, columns=headers)
+            df = pd.DataFrame(data, columns=unique_headers)
             
             # Clean empty rows
             initial_rows = len(df)
@@ -557,8 +603,19 @@ class BookingManager:
                 add_log("Sheet is empty", "WARNING")
                 return pd.DataFrame()
             
-            # Use first row as headers
-            df = pd.DataFrame(all_values[1:], columns=all_values[0])
+            headers = all_values[0]
+            seen = {}
+            unique_headers = []
+            for header in headers:
+                if header in seen:
+                    seen[header] += 1
+                    unique_headers.append(f"{header}_{seen[header]}")
+                else:
+                    seen[header] = 0
+                    unique_headers.append(header)
+            
+            # Use unique headers
+            df = pd.DataFrame(all_values[1:], columns=unique_headers)
             
             add_log(f"Loaded {len(df)} rows with {len(df.columns)} columns", "SUCCESS")
             
@@ -591,6 +648,61 @@ class BookingManager:
             return True
         except Exception as e:
             add_log(f"Error adding booking: {str(e)}", "ERROR")
+            return False
+
+    def copy_row(self, sheet, row_index: int) -> List:
+        """Copy a row from the sheet"""
+        try:
+            add_log(f"Copying row {row_index} from {sheet.title}", "INFO")
+            all_values = sheet.get_all_values()
+            
+            if row_index < len(all_values):
+                row_data = all_values[row_index]
+                add_log(f"Row copied successfully: {len(row_data)} cells", "SUCCESS")
+                return row_data
+            else:
+                add_log(f"Row index {row_index} out of range", "ERROR")
+                return []
+        except Exception as e:
+            add_log(f"Error copying row: {str(e)}", "ERROR")
+            return []
+    
+    def append_row(self, sheet, data: List) -> bool:
+        """Append a new row to the sheet"""
+        try:
+            add_log(f"Appending row to {sheet.title}", "INFO")
+            sheet.append_row(data)
+            add_log(f"Row appended successfully with {len(data)} cells", "SUCCESS")
+            return True
+        except Exception as e:
+            add_log(f"Error appending row: {str(e)}", "ERROR")
+            return False
+    
+    def update_cell_live(self, sheet, row: int, col: int, value: str) -> bool:
+        """Update a single cell in real-time"""
+        try:
+            add_log(f"Updating cell [{row}, {col}] in {sheet.title} to: {value}", "INFO")
+            sheet.update_cell(row, col, value)
+            add_log("Cell updated successfully", "SUCCESS")
+            return True
+        except Exception as e:
+            add_log(f"Error updating cell: {str(e)}", "ERROR")
+            return False
+    
+    def batch_update_cells(self, sheet, cell_list: List[Dict]) -> bool:
+        """Batch update multiple cells at once
+        cell_list format: [{'row': 1, 'col': 1, 'value': 'text'}, ...]
+        """
+        try:
+            add_log(f"Batch updating {len(cell_list)} cells in {sheet.title}", "INFO")
+            
+            for cell_data in cell_list:
+                sheet.update_cell(cell_data['row'], cell_data['col'], cell_data['value'])
+            
+            add_log(f"Batch update completed: {len(cell_list)} cells updated", "SUCCESS")
+            return True
+        except Exception as e:
+            add_log(f"Error in batch update: {str(e)}", "ERROR")
             return False
 
 def authenticate():
@@ -998,10 +1110,117 @@ def render_calendar_view(manager, workbook):
             st.info("No bookings in this calendar")
 
 def render_booking_manager(manager, workbook):
-    """Render booking manager"""
-    st.markdown('<div class="section-header">➕ Booking Manager</div>', unsafe_allow_html=True)
+    """Render booking manager with live editing capabilities"""
+    st.markdown('<div class="section-header">✏️ Booking Manager - Live Edit</div>', unsafe_allow_html=True)
     
-    st.info("Booking creation interface - Coming soon!")
+    calendars = manager.get_calendar_sheets(workbook)
+    
+    if not calendars:
+        st.warning("No calendar sheets found")
+        return
+    
+    calendar_names = [cal['name'] for cal in calendars]
+    selected_calendar = st.selectbox("Select Calendar to Edit", calendar_names)
+    
+    selected_cal = next((cal for cal in calendars if cal['name'] == selected_calendar), None)
+    
+    if selected_cal:
+        sheet = selected_cal['sheet']
+        
+        tab1, tab2, tab3 = st.tabs(["📝 Edit Data", "➕ Add Booking", "📋 Copy/Append"])
+        
+        with tab1:
+            st.markdown("### Edit Existing Data")
+            df = manager.read_calendar(sheet)
+            
+            if not df.empty:
+                st.dataframe(df, use_container_width=True)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    edit_row = st.number_input("Row Number (from row 13)", min_value=13, value=13)
+                with col2:
+                    edit_col = st.number_input("Column Number", min_value=1, value=1)
+                with col3:
+                    new_value = st.text_input("New Value")
+                
+                if st.button("💾 Update Cell", type="primary"):
+                    if manager.update_cell_live(sheet, edit_row, edit_col, new_value):
+                        st.success("✅ Cell updated successfully!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to update cell")
+            else:
+                st.info("No data to edit")
+        
+        with tab2:
+            st.markdown("### Add New Booking")
+            
+            df = manager.read_calendar(sheet)
+            if not df.empty:
+                num_cols = len(df.columns)
+                
+                st.info(f"This sheet has {num_cols} columns. Fill in the values below:")
+                
+                new_row_data = []
+                cols = st.columns(min(num_cols, 4))
+                
+                for i in range(num_cols):
+                    with cols[i % 4]:
+                        col_name = df.columns[i] if i < len(df.columns) else f"Column {i+1}"
+                        value = st.text_input(f"{col_name}", key=f"new_col_{i}")
+                        new_row_data.append(value)
+                
+                if st.button("➕ Add Booking Row", type="primary"):
+                    if manager.append_row(sheet, new_row_data):
+                        st.success("✅ Booking added successfully!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to add booking")
+            else:
+                st.warning("Cannot add booking - sheet structure unknown")
+        
+        with tab3:
+            st.markdown("### Copy and Append Rows")
+            
+            df = manager.read_calendar(sheet)
+            if not df.empty:
+                st.dataframe(df, use_container_width=True)
+                
+                row_to_copy = st.number_input(
+                    "Row Number to Copy (from row 13)", 
+                    min_value=13, 
+                    value=13,
+                    help="Enter the row number you want to copy"
+                )
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("📋 Copy Row", type="secondary"):
+                        copied_data = manager.copy_row(sheet, row_to_copy - 1)
+                        if copied_data:
+                            st.session_state['copied_row'] = copied_data
+                            st.success(f"✅ Row {row_to_copy} copied! ({len(copied_data)} cells)")
+                        else:
+                            st.error("❌ Failed to copy row")
+                
+                with col2:
+                    if st.button("➕ Append Copied Row", type="primary"):
+                        if 'copied_row' in st.session_state:
+                            if manager.append_row(sheet, st.session_state['copied_row']):
+                                st.success("✅ Row appended successfully!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to append row")
+                        else:
+                            st.warning("⚠️ No row copied yet. Copy a row first!")
+                
+                if 'copied_row' in st.session_state:
+                    st.markdown("### 📋 Copied Row Preview")
+                    st.json(st.session_state['copied_row'])
+            else:
+                st.info("No data available to copy")
 
 def render_system_logs():
     """Render system logs"""
