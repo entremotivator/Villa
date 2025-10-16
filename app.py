@@ -3347,7 +3347,7 @@ def render_advanced_bulk_editor(manager, workbook):
                     for row in range(delete_end, delete_start - 1, -1):
                         sheet.delete_rows(row)
                     
-                    st.success(f"✅ Deleted rows {delete_start} to {delete{delete_end}}!") # Corrected typo
+                    st.success(f"✅ Deleted rows {delete_start} to {delete_end}!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
