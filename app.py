@@ -2200,8 +2200,8 @@ def render_templates(manager):
             
             for i in range(num_fields):
                 with cols[i % 2]:
-                    field_name = st.text_input(f"Field {i+1} Name", key=f"field_name_{i}")
-                    field_value = st.text_input(f"Field {i+1} Value", key=f"field_value_{i}")
+                    field_name = st.text_input("Field Name", key=f"field_name_{i}")
+                    field_value = st.text_input("Field Value", key=f"field_value_{i}")
                     if field_name:
                         template_data[field_name] = field_value
             
@@ -2687,8 +2687,6 @@ def render_interactive_calendar_grid(manager, workbook):
                 
                 if not day_bookings_df.empty:
                     st.dataframe(day_bookings_df, use_container_width=True)
-                else:
-                    st.info("No bookings for this date")
         
         if st.button("Clear Filter"):
             del st.session_state.quick_filters['date']
