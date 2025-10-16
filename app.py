@@ -14,6 +14,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import hashlib
+import requests
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Configure logging
 logging.basicConfig(
@@ -32,7 +35,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for enhanced styling
 st.markdown("""
 <style>
     .main-header {
@@ -250,6 +252,36 @@ st.markdown("""
         font-weight: bold;
         margin-left: 0.5rem;
     }
+    .bulk-edit-card {
+        background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 5px solid #00d2ff;
+        margin: 1rem 0;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        color: #000000;
+    }
+    .bulk-edit-card h1, .bulk-edit-card h2, .bulk-edit-card h3, .bulk-edit-card h4, 
+    .bulk-edit-card p, .bulk-edit-card strong, .bulk-edit-card span, .bulk-edit-card div {
+        color: #000000 !important;
+    }
+    .calendar-card {
+        background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 5px solid #fdcb6e;
+        margin: 1rem 0;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        color: #000000;
+    }
+    .template-card {
+        background: linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: white;
+        margin: 1rem 0;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -280,17 +312,51 @@ if 'pending_changes' not in st.session_state:
     st.session_state.pending_changes = []
 if 'notification_count' not in st.session_state:
     st.session_state.notification_count = 0
+if 'templates' not in st.session_state:
+    st.session_state.templates = []
+if 'dark_mode' not in st.session_state:
+    st.session_state.dark_mode = False
+if 'auto_backup' not in st.session_state:
+    st.session_state.auto_backup = True
+if 'backup_history' not in st.session_state:
+    st.session_state.backup_history = []
 
-# Status code definitions
 STATUS_CODES = {
-    'CI': {'name': 'Check-In', 'description': 'Complete cleaning and preparation for incoming guests', 'color': '#4CAF50'},
-    'SO': {'name': 'Stay-over', 'description': 'Mid-stay cleaning with linen and towel refresh', 'color': '#2196F3'},
-    'CO/CI': {'name': 'Check-out/Check-in', 'description': 'Same-day turnover between guests', 'color': '#FF9800'},
-    'FU': {'name': 'Fresh-up', 'description': 'Quick refresh for already clean property', 'color': '#9C27B0'},
-    'DC': {'name': 'Deep Cleaning', 'description': 'Thorough deep clean of entire property', 'color': '#F44336'},
-    'COC': {'name': 'Construction Cleaning', 'description': 'Post-renovation construction cleanup', 'color': '#795548'},
-    'CO': {'name': 'Check-Out', 'description': 'Final cleaning after guest departure', 'color': '#607D8B'}
+    'CI': {'name': 'Check-In', 'description': 'Complete cleaning and preparation for incoming guests', 'color': '#4CAF50', 'icon': '🏠'},
+    'SO': {'name': 'Stay-over', 'description': 'Mid-stay cleaning with linen and towel refresh', 'color': '#2196F3', 'icon': '🔄'},
+    'CO/CI': {'name': 'Check-out/Check-in', 'description': 'Same-day turnover between guests', 'color': '#FF9800', 'icon': '🔁'},
+    'FU': {'name': 'Fresh-up', 'description': 'Quick refresh for already clean property', 'color': '#9C27B0', 'icon': '✨'},
+    'DC': {'name': 'Deep Cleaning', 'description': 'Thorough deep clean of entire property', 'color': '#F44336', 'icon': '🧹'},
+    'COC': {'name': 'Construction Cleaning', 'description': 'Post-renovation construction cleanup', 'color': '#795548', 'icon': '🏗️'},
+    'CO': {'name': 'Check-Out', 'description': 'Final cleaning after guest departure', 'color': '#607D8B', 'icon': '🚪'}
 }
+
+# Data loading functions
+@st.cache_data(ttl=300)
+def load_client_data():
+    """Load client information from CSV"""
+    url = "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Reservations%20%20Casa%20Bohemian%20Curacao%20-%20Casa%20Bohemian%20Client%20Info%20-IePfFT3QCALdQtGNNBVbbLkVBW4eDR.csv"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        df = pd.read_csv(StringIO(response.text))
+        return df
+    except Exception as e:
+        st.error(f"Error loading client data: {str(e)}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def load_reservations_data():
+    """Load reservations from CSV"""
+    url = "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Reservations%20%20Casa%20Bohemian%20Curacao%20-%20Nov%2725-uf4T55IrkhN7ak0nY1OqWgPhIaAWdA.csv"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        df = pd.read_csv(StringIO(response.text))
+        return df
+    except Exception as e:
+        st.error(f"Error loading reservations: {str(e)}")
+        return pd.DataFrame()
 
 def add_log(message: str, level: str = "INFO"):
     """Add a log entry with timestamp"""
@@ -331,6 +397,88 @@ def add_edit_history(action: str, details: Dict):
         st.session_state.edit_history = st.session_state.edit_history[-1000:]
     
     add_log(f"Edit: {action} - {details}", "SUCCESS")
+
+def create_backup(workbook, sheet_name: str) -> Dict:
+    """Create a backup of current sheet data"""
+    try:
+        sheet = workbook.worksheet(sheet_name)
+        all_values = sheet.get_all_values()
+        
+        backup = {
+            'timestamp': datetime.now().isoformat(),
+            'workbook': workbook.title,
+            'sheet': sheet_name,
+            'data': all_values,
+            'row_count': len(all_values),
+            'col_count': len(all_values[0]) if all_values else 0
+        }
+        
+        st.session_state.backup_history.append(backup)
+        
+        # Keep only last 50 backups
+        if len(st.session_state.backup_history) > 50:
+            st.session_state.backup_history = st.session_state.backup_history[-50:]
+        
+        add_log(f"Backup created: {sheet_name} ({len(all_values)} rows)", "SUCCESS")
+        return backup
+    except Exception as e:
+        add_log(f"Backup failed: {str(e)}", "ERROR")
+        return None
+
+def restore_backup(backup: Dict, manager) -> bool:
+    """Restore data from a backup"""
+    try:
+        workbook = manager.gc.open(backup['workbook'])
+        sheet = workbook.worksheet(backup['sheet'])
+        
+        # Clear existing data
+        sheet.clear()
+        
+        # Restore backup data
+        if backup['data']:
+            sheet.update(backup['data'], 'A1')
+        
+        add_log(f"Backup restored: {backup['sheet']} from {backup['timestamp']}", "SUCCESS")
+        return True
+    except Exception as e:
+        add_log(f"Restore failed: {str(e)}", "ERROR")
+        return False
+
+def save_template(name: str, description: str, data: Dict):
+    """Save a booking template"""
+    template = {
+        'id': hashlib.md5(f"{name}{datetime.now().isoformat()}".encode()).hexdigest()[:8],
+        'name': name,
+        'description': description,
+        'data': data,
+        'created': datetime.now().isoformat(),
+        'usage_count': 0
+    }
+    st.session_state.templates.append(template)
+    add_log(f"Template saved: {name}", "SUCCESS")
+    return template
+
+def apply_template(template: Dict, sheet, row_index: int, manager) -> bool:
+    """Apply a template to a specific row"""
+    try:
+        data = template['data']
+        updates = []
+        
+        for col_idx, value in enumerate(data.values(), start=1):
+            updates.append({
+                'row': row_index,
+                'col': col_idx,
+                'value': value
+            })
+        
+        if manager.batch_update_cells(sheet, updates):
+            template['usage_count'] += 1
+            add_log(f"Template applied: {template['name']} to row {row_index}", "SUCCESS")
+            return True
+        return False
+    except Exception as e:
+        add_log(f"Template application failed: {str(e)}", "ERROR")
+        return False
 
 class EmailManager:
     """Manages email sending functionality"""
@@ -689,6 +837,26 @@ class BookingManager:
             add_log(f"Error in batch update: {str(e)}", "ERROR")
             return False
     
+    def bulk_text_update(self, sheet, start_row: int, start_col: int, text_data: str) -> bool:
+        """Update multiple cells from pasted text data (tab/newline separated)"""
+        try:
+            lines = text_data.strip().split('\n')
+            updates = []
+            
+            for row_offset, line in enumerate(lines):
+                cells = line.split('\t')
+                for col_offset, value in enumerate(cells):
+                    updates.append({
+                        'row': start_row + row_offset,
+                        'col': start_col + col_offset,
+                        'value': value.strip()
+                    })
+            
+            return self.batch_update_cells(sheet, updates)
+        except Exception as e:
+            add_log(f"Error in bulk text update: {str(e)}", "ERROR")
+            return False
+    
     def append_row(self, sheet, data: List) -> bool:
         """Append a new row to the sheet"""
         try:
@@ -919,7 +1087,8 @@ def main_app():
 
     view_mode = st.radio(
         "📑 View Mode",
-        ["Dashboard", "Live Editor", "Email Center", "Search & Analytics", "Edit History", "System Logs"],
+        ["Dashboard", "Bulk Text Editor", "Live Editor", "Calendar View", "Email Center", 
+         "Search & Analytics", "Templates", "Backup & Restore", "Edit History", "System Logs"],
         help="Choose what to display"
     )
     
@@ -933,6 +1102,14 @@ def main_app():
         if workbook:
             render_dashboard(manager, workbook)
     
+    elif view_mode == "Bulk Text Editor":
+        if not st.session_state.current_workbook:
+            st.info("👈 Please select a workbook from the sidebar")
+            return
+        workbook = manager.open_workbook(st.session_state.current_workbook)
+        if workbook:
+            render_bulk_text_editor(manager, workbook)
+    
     elif view_mode == "Live Editor":
         if not st.session_state.current_workbook:
             st.info("👈 Please select a workbook from the sidebar")
@@ -940,6 +1117,14 @@ def main_app():
         workbook = manager.open_workbook(st.session_state.current_workbook)
         if workbook:
             render_live_editor(manager, workbook)
+    
+    elif view_mode == "Calendar View":
+        if not st.session_state.current_workbook:
+            st.info("👈 Please select a workbook from the sidebar")
+            return
+        workbook = manager.open_workbook(st.session_state.current_workbook)
+        if workbook:
+            render_calendar_view(manager, workbook)
     
     elif view_mode == "Email Center":
         render_email_center(manager)
@@ -952,6 +1137,17 @@ def main_app():
         if workbook:
             render_search_analytics(manager, workbook)
     
+    elif view_mode == "Templates":
+        render_templates(manager)
+    
+    elif view_mode == "Backup & Restore":
+        if not st.session_state.current_workbook:
+            st.info("👈 Please select a workbook from the sidebar")
+            return
+        workbook = manager.open_workbook(st.session_state.current_workbook)
+        if workbook:
+            render_backup_restore(manager, workbook)
+    
     elif view_mode == "Edit History":
         render_edit_history()
     
@@ -959,13 +1155,13 @@ def main_app():
         render_system_logs()
 
 def render_dashboard(manager, workbook):
-    """Render enhanced dashboard view"""
+    """Render enhanced dashboard view with all property information"""
     st.markdown('<div class="section-header">📊 Dashboard Overview</div>', unsafe_allow_html=True)
     
     profile = manager.get_client_profile(workbook)
     calendars = manager.get_calendar_sheets(workbook)
     
-    # Client header
+    # Client header with all info
     col1, col2, col3 = st.columns([2, 1, 1])
     
     with col1:
@@ -974,6 +1170,9 @@ def render_dashboard(manager, workbook):
             <h2 style="margin-top: 0;">👤 {profile.get('client_name', 'Unknown Client')}</h2>
             <p><strong>Check-out:</strong> {profile.get('check_out_time', 'N/A')} | 
                <strong>Check-in:</strong> {profile.get('check_in_time', 'N/A')}</p>
+            <p><strong>Amenities:</strong> {profile.get('amenities', 'N/A')}</p>
+            <p><strong>Laundry:</strong> {profile.get('laundry_services', 'N/A')}</p>
+            <p><strong>Keys:</strong> {profile.get('keys', 'N/A')} | <strong>Codes:</strong> {profile.get('codes', 'N/A')}</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -983,22 +1182,29 @@ def render_dashboard(manager, workbook):
     with col3:
         st.metric("📅 Calendars", len(calendars))
     
-    # Quick stats
+    # Quick stats with enhanced metrics
     total_bookings = 0
     upcoming_bookings = 0
     today = datetime.now().date()
+    status_counts = {}
     
     for cal in calendars:
         df = manager.read_calendar(cal['sheet'])
         if not df.empty:
             total_bookings += len(df)
             
+            # Count status codes
+            for col in df.columns:
+                if 'status' in col.lower() or 'code' in col.lower():
+                    for status in df[col]:
+                        status_counts[status] = status_counts.get(status, 0) + 1
+            
             for col in df.columns:
                 if 'date' in col.lower():
                     dates = pd.to_datetime(df[col], errors='coerce')
                     upcoming_bookings += (dates >= pd.Timestamp(today)).sum()
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.markdown(f"""
@@ -1032,22 +1238,54 @@ def render_dashboard(manager, workbook):
         </div>
         """, unsafe_allow_html=True)
     
-    # Properties section
-    if profile.get('properties'):
-        st.markdown("### 🏘️ Properties")
-        prop_cols = st.columns(min(len(profile['properties']), 3))
-        
-        for idx, prop in enumerate(profile['properties']):
-            with prop_cols[idx % 3]:
-                st.markdown(f"""
-                <div class="property-card">
-                    <h4 style="color: #667eea;">🏠 {prop['name']}</h4>
-                    <p><strong>📍</strong> {prop['address']}</p>
-                    <p><strong>⏱️</strong> {prop['hours']} | <strong>🔄</strong> {prop['so_hours']}</p>
-                </div>
-                """, unsafe_allow_html=True)
+    with col5:
+        st.markdown(f"""
+        <div class="metric-card">
+            <h4 style="color: #e91e63;">💾 Backups</h4>
+            <h2>{len(st.session_state.backup_history)}</h2>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Recent activity
+    # Status code distribution
+    if status_counts:
+        st.markdown("### 📊 Status Code Distribution")
+        status_df = pd.DataFrame(list(status_counts.items()), columns=['Status', 'Count'])
+        
+        fig = px.pie(status_df, values='Count', names='Status', 
+                     title='Booking Status Distribution',
+                     color_discrete_sequence=px.colors.qualitative.Set3)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Properties section with FULL information in cards
+    if profile.get('properties'):
+        st.markdown("### 🏘️ Properties - Complete Information")
+        
+        for prop in profile['properties']:
+            st.markdown(f"""
+            <div class="property-card">
+                <h3 style="color: #667eea; margin-top: 0;">🏠 {prop['name']}</h3>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-top: 1rem;">
+                    <div>
+                        <p style="margin: 0.5rem 0;"><strong>📍 Address:</strong></p>
+                        <p style="margin: 0;">{prop['address']}</p>
+                    </div>
+                    <div>
+                        <p style="margin: 0.5rem 0;"><strong>⏱️ Standard Hours:</strong></p>
+                        <p style="margin: 0;">{prop['hours']}</p>
+                    </div>
+                    <div>
+                        <p style="margin: 0.5rem 0;"><strong>🔄 Stay-Over Hours:</strong></p>
+                        <p style="margin: 0;">{prop['so_hours']}</p>
+                    </div>
+                    <div>
+                        <p style="margin: 0.5rem 0;"><strong>📊 Status:</strong></p>
+                        <p style="margin: 0;">Active</p>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Recent activity with enhanced display
     st.markdown("### 📊 Recent Activity")
     
     if st.session_state.edit_history:
@@ -1057,10 +1295,124 @@ def render_dashboard(manager, workbook):
             st.markdown(f"""
             <div class="log-entry log-success">
                 <strong>[{edit['timestamp']}]</strong> {edit['action']} by {edit['user'][:30]}...
+                <br><small>{str(edit['details'])[:100]}...</small>
             </div>
             """, unsafe_allow_html=True)
     else:
         st.info("No recent activity")
+    
+    # Quick actions
+    st.markdown("### ⚡ Quick Actions")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("📝 New Booking", use_container_width=True):
+            st.session_state.quick_action = "new_booking"
+    
+    with col2:
+        if st.button("📧 Send Report", use_container_width=True):
+            st.session_state.quick_action = "send_report"
+    
+    with col3:
+        if st.button("💾 Create Backup", use_container_width=True):
+            if calendars:
+                create_backup(workbook, calendars[0]['name'])
+                st.success("✅ Backup created!")
+    
+    with col4:
+        if st.button("📊 View Analytics", use_container_width=True):
+            st.session_state.quick_action = "analytics"
+
+def render_bulk_text_editor(manager, workbook):
+    """Render bulk text editing interface for pasting from Excel/Sheets"""
+    st.markdown('<div class="section-header">📝 Bulk Text Editor</div>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="bulk-edit-card">
+        <h3 style="margin-top: 0;">✨ Paste & Update Multiple Cells</h3>
+        <p>Copy cells from Excel or Google Sheets and paste them here to update multiple cells at once.</p>
+        <p><strong>Format:</strong> Tab-separated columns, newline-separated rows (standard copy-paste format)</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    calendars = manager.get_calendar_sheets(workbook)
+    
+    if not calendars:
+        st.warning("No calendar sheets found")
+        return
+    
+    calendar_names = [cal['name'] for cal in calendars]
+    selected_calendar = st.selectbox("📅 Select Calendar", calendar_names)
+    
+    selected_cal = next((cal for cal in calendars if cal['name'] == selected_calendar), None)
+    
+    if selected_cal:
+        sheet = selected_cal['sheet']
+        
+        # Show current data
+        df = manager.read_calendar(sheet)
+        
+        if not df.empty:
+            st.markdown("### Current Data")
+            st.dataframe(df, use_container_width=True, height=300)
+        
+        st.markdown("---")
+        st.markdown("### Paste Your Data")
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            start_row = st.number_input("Starting Row", min_value=1, value=13, 
+                                       help="Row number where pasted data will start")
+        
+        with col2:
+            start_col = st.number_input("Starting Column", min_value=1, value=1,
+                                       help="Column number where pasted data will start")
+        
+        # Large text area for pasting
+        pasted_data = st.text_area(
+            "Paste Data Here (Ctrl+V / Cmd+V)",
+            height=300,
+            placeholder="Copy cells from Excel/Sheets and paste here...\nExample:\nDate\tProperty\tStatus\n2025-01-15\tVilla A\tCI\n2025-01-16\tVilla B\tSO",
+            help="Paste tab-separated data directly from spreadsheets"
+        )
+        
+        if pasted_data:
+            # Preview what will be updated
+            st.markdown("### Preview")
+            lines = pasted_data.strip().split('\n')
+            preview_data = []
+            
+            for row_offset, line in enumerate(lines[:10]):  # Show first 10 rows
+                cells = line.split('\t')
+                preview_data.append({
+                    'Row': start_row + row_offset,
+                    'Data': ' | '.join(cells[:5])  # Show first 5 columns
+                })
+            
+            st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+            
+            if len(lines) > 10:
+                st.info(f"... and {len(lines) - 10} more rows")
+            
+            col1, col2, col3 = st.columns([1, 1, 2])
+            
+            with col1:
+                if st.button("💾 Update Cells", type="primary", use_container_width=True):
+                    with st.spinner("Updating cells..."):
+                        if st.session_state.auto_backup:
+                            create_backup(workbook, sheet.title)
+                        
+                        if manager.bulk_text_update(sheet, start_row, start_col, pasted_data):
+                            st.success(f"✅ Updated {len(lines)} rows successfully!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error("❌ Update failed")
+            
+            with col2:
+                if st.button("🔄 Clear", use_container_width=True):
+                    st.rerun()
 
 def render_live_editor(manager, workbook):
     """Render advanced live editing interface"""
@@ -1080,7 +1432,7 @@ def render_live_editor(manager, workbook):
     if selected_cal:
         sheet = selected_cal['sheet']
         
-        tab1, tab2, tab3, tab4 = st.tabs(["📝 Edit Cells", "➕ Add Booking", "🗑️ Delete Row", "📋 Bulk Operations"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Edit Cells", "➕ Add Booking", "🗑️ Delete Row", "📋 Bulk Operations", "🎨 Quick Status"])
         
         with tab1:
             st.markdown("### Single Cell Editor")
@@ -1119,6 +1471,20 @@ def render_live_editor(manager, workbook):
             if not df.empty:
                 st.info(f"Sheet has {len(df.columns)} columns")
                 
+                # Check if templates exist
+                if st.session_state.templates:
+                    use_template = st.checkbox("Use Template")
+                    if use_template:
+                        template_names = [t['name'] for t in st.session_state.templates]
+                        selected_template_name = st.selectbox("Select Template", template_names)
+                        selected_template = next((t for t in st.session_state.templates if t['name'] == selected_template_name), None)
+                        
+                        if selected_template and st.button("Apply Template"):
+                            new_row = list(selected_template['data'].values())
+                            if manager.append_row(sheet, new_row):
+                                st.success("✅ Booking added from template!")
+                                st.rerun()
+                
                 with st.form("add_booking_form"):
                     new_row = []
                     cols = st.columns(2)
@@ -1128,7 +1494,11 @@ def render_live_editor(manager, workbook):
                             value = st.text_input(f"{col_name}", key=f"add_{i}")
                             new_row.append(value)
                     
-                    submitted = st.form_submit_button("➕ Add Booking", type="primary")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        submitted = st.form_submit_button("➕ Add Booking", type="primary")
+                    with col2:
+                        save_as_template = st.form_submit_button("💾 Save as Template")
                     
                     if submitted:
                         if manager.append_row(sheet, new_row):
@@ -1136,6 +1506,13 @@ def render_live_editor(manager, workbook):
                             st.rerun()
                         else:
                             st.error("❌ Failed to add")
+                    
+                    if save_as_template:
+                        template_name = st.text_input("Template Name")
+                        if template_name:
+                            template_data = {df.columns[i]: new_row[i] for i in range(len(new_row))}
+                            save_template(template_name, "Booking template", template_data)
+                            st.success("✅ Template saved!")
         
         with tab3:
             st.markdown("### Delete Row")
@@ -1161,6 +1538,9 @@ def render_live_editor(manager, workbook):
                     if st.button("🗑️ Delete", type="secondary", use_container_width=True):
                         confirm = st.checkbox("I confirm deletion")
                         if confirm:
+                            if st.session_state.auto_backup:
+                                create_backup(workbook, sheet.title)
+                            
                             if manager.delete_row(sheet, row_to_delete):
                                 st.success("✅ Row deleted!")
                                 st.rerun()
@@ -1213,11 +1593,143 @@ def render_live_editor(manager, workbook):
                 if st.button("🚀 Execute Batch Update", type="primary"):
                     try:
                         updates = json.loads(st.session_state.batch_json)
+                        if st.session_state.auto_backup:
+                            create_backup(workbook, sheet.title)
+                        
                         if manager.batch_update_cells(sheet, updates):
                             st.success(f"✅ Updated {len(updates)} cells!")
                             st.rerun()
                     except json.JSONDecodeError:
                         st.error("❌ Invalid JSON format")
+        
+        with tab5:
+            st.markdown("### Quick Status Update")
+            st.markdown("Update status codes quickly for multiple bookings")
+            
+            df = manager.read_calendar(sheet)
+            
+            if not df.empty:
+                # Find status column
+                status_col = None
+                for col in df.columns:
+                    if 'status' in col.lower() or 'code' in col.lower():
+                        status_col = col
+                        break
+                
+                if status_col:
+                    st.info(f"Status column: {status_col}")
+                    
+                    # Display status codes
+                    st.markdown("#### Available Status Codes")
+                    cols = st.columns(len(STATUS_CODES))
+                    
+                    for idx, (code, info) in enumerate(STATUS_CODES.items()):
+                        with cols[idx]:
+                            st.markdown(f"""
+                            <div style="background: {info['color']}; color: white; padding: 0.5rem; border-radius: 5px; text-align: center;">
+                                <strong>{info['icon']} {code}</strong><br>
+                                <small>{info['name']}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        row_num = st.number_input("Row Number", min_value=13, value=13)
+                    
+                    with col2:
+                        new_status = st.selectbox("New Status", list(STATUS_CODES.keys()))
+                    
+                    with col3:
+                        st.write("")
+                        st.write("")
+                        if st.button("🎨 Update Status", type="primary", use_container_width=True):
+                            # Find column index
+                            col_idx = list(df.columns).index(status_col) + 1
+                            if manager.update_cell_live(sheet, row_num, col_idx, new_status):
+                                st.success(f"✅ Status updated to {new_status}!")
+                                st.rerun()
+                else:
+                    st.warning("No status column found in this sheet")
+
+def render_calendar_view(manager, workbook):
+    """Render calendar view of bookings"""
+    st.markdown('<div class="section-header">📅 Calendar View</div>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="calendar-card">
+        <h3 style="margin-top: 0;">📆 Visual Booking Calendar</h3>
+        <p>View and manage bookings in a calendar format</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    calendars = manager.get_calendar_sheets(workbook)
+    
+    if not calendars:
+        st.warning("No calendars found")
+        return
+    
+    selected_calendar = st.selectbox("Select Calendar", [cal['name'] for cal in calendars])
+    selected_cal = next((cal for cal in calendars if cal['name'] == selected_calendar), None)
+    
+    if selected_cal:
+        sheet = selected_cal['sheet']
+        df = manager.read_calendar(sheet)
+        
+        if not df.empty:
+            # Find date column
+            date_col = None
+            for col in df.columns:
+                if 'date' in col.lower():
+                    date_col = col
+                    break
+            
+            if date_col:
+                # Date range selector
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    start_date = st.date_input("Start Date", datetime.now().date())
+                
+                with col2:
+                    end_date = st.date_input("End Date", datetime.now().date() + timedelta(days=30))
+                
+                # Filter bookings by date range
+                filtered_df = manager.get_bookings_by_date_range(
+                    sheet, 
+                    datetime.combine(start_date, datetime.min.time()),
+                    datetime.combine(end_date, datetime.max.time()),
+                    date_col
+                )
+                
+                if not filtered_df.empty:
+                    st.markdown(f"### Bookings: {start_date} to {end_date}")
+                    st.markdown(f"**Total:** {len(filtered_df)} bookings")
+                    
+                    # Create timeline visualization
+                    if date_col in filtered_df.columns:
+                        filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors='coerce')
+                        
+                        # Group by date
+                        daily_counts = filtered_df.groupby(filtered_df[date_col].dt.date).size().reset_index()
+                        daily_counts.columns = ['Date', 'Bookings']
+                        
+                        fig = px.bar(daily_counts, x='Date', y='Bookings',
+                                    title='Daily Booking Count',
+                                    color='Bookings',
+                                    color_continuous_scale='Blues')
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display bookings
+                    st.dataframe(filtered_df, use_container_width=True)
+                else:
+                    st.info("No bookings in selected date range")
+            else:
+                st.warning("No date column found in this calendar")
+                st.dataframe(df, use_container_width=True)
+
 
 def render_email_center(manager):
     """Render email management center"""
@@ -1359,7 +1871,7 @@ def render_email_center(manager):
             st.info("No emails sent yet")
 
 def render_search_analytics(manager, workbook):
-    """Render search and analytics interface"""
+    """Render enhanced search and analytics interface"""
     st.markdown('<div class="section-header">🔍 Search & Analytics</div>', unsafe_allow_html=True)
     
     calendars = manager.get_calendar_sheets(workbook)
@@ -1368,7 +1880,7 @@ def render_search_analytics(manager, workbook):
         st.warning("No calendars found")
         return
     
-    tab1, tab2 = st.tabs(["🔍 Advanced Search", "📊 Analytics"])
+    tab1, tab2, tab3 = st.tabs(["🔍 Advanced Search", "📊 Analytics Dashboard", "📈 Trends"])
     
     with tab1:
         selected_calendar = st.selectbox("Calendar", [cal['name'] for cal in calendars])
@@ -1389,9 +1901,10 @@ def render_search_analytics(manager, workbook):
                 
                 if st.button("🔍 Search", type="primary"):
                     if search_term:
-                        result = manager.search_bookings(                            df,
+                        result = manager.search_bookings(
+                            sheet,
                             search_term,
-                            search_columns
+                            search_columns if search_columns else None
                         )
                         
                         if not result.empty:
@@ -1406,14 +1919,14 @@ def render_search_analytics(manager, workbook):
                                 mime="text/csv"
                             )
                         else:
-                            st.warning("No results found matching your search criteria.")
+                            st.warning("No results found")
                     else:
-                        st.warning("Please enter a search term.")
+                        st.warning("Please enter a search term")
             else:
-                st.info("No data available in this calendar.")
+                st.info("No data available")
     
     with tab2:
-        st.markdown('<div class="analytics-card"><h3>📊 Analytics Dashboard</h3></div>', unsafe_allow_html=True)
+        st.markdown("### 📊 Analytics Dashboard")
         
         selected_calendar = st.selectbox("Select Calendar for Analytics", [cal['name'] for cal in calendars], key="analytics_calendar")
         selected_cal = next((cal for cal in calendars if cal['name'] == selected_calendar), None)
@@ -1423,37 +1936,55 @@ def render_search_analytics(manager, workbook):
             df = manager.read_calendar(sheet)
             
             if not df.empty:
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    st.markdown(f'<div class="metric-card"><h2>{len(df)}</h2><p>Total Bookings</p></div>', unsafe_allow_html=True)
+                    st.metric("📋 Total Bookings", len(df))
                 
                 with col2:
                     property_cols = [col for col in df.columns if 'property' in col.lower() or 'location' in col.lower()]
                     if property_cols:
                         unique_properties = df[property_cols[0]].nunique()
-                        st.markdown(f'<div class="metric-card"><h2>{unique_properties}</h2><p>Properties</p></div>', unsafe_allow_html=True)
+                        st.metric("🏘️ Properties", unique_properties)
                     else:
-                        st.markdown(f'<div class="metric-card"><h2>N/A</h2><p>Properties</p></div>', unsafe_allow_html=True)
+                        st.metric("🏘️ Properties", "N/A")
                 
                 with col3:
                     status_cols = [col for col in df.columns if 'status' in col.lower() or 'code' in col.lower()]
                     if status_cols:
                         status_counts = df[status_cols[0]].value_counts()
-                        st.markdown(f'<div class="metric-card"><h2>{len(status_counts)}</h2><p>Status Types</p></div>', unsafe_allow_html=True)
+                        st.metric("📊 Status Types", len(status_counts))
                     else:
-                        st.markdown(f'<div class="metric-card"><h2>N/A</h2><p>Status Types</p></div>', unsafe_allow_html=True)
+                        st.metric("📊 Status Types", "N/A")
+                
+                with col4:
+                    st.metric("📅 Columns", len(df.columns))
                 
                 st.markdown("---")
                 
+                # Status distribution chart
                 if status_cols:
                     st.markdown("#### Status Code Distribution")
                     status_df = pd.DataFrame(status_counts).reset_index()
                     status_df.columns = ['Status', 'Count']
-                    st.dataframe(status_df, use_container_width=True)
+                    
+                    fig = px.pie(status_df, values='Count', names='Status',
+                                title='Booking Status Distribution',
+                                color_discrete_sequence=px.colors.qualitative.Pastel)
+                    st.plotly_chart(fig, use_container_width=True)
                 
-                st.markdown("#### Recent Bookings")
-                st.dataframe(df.head(10), use_container_width=True)
+                # Property distribution
+                if property_cols:
+                    st.markdown("#### Property Distribution")
+                    property_counts = df[property_cols[0]].value_counts()
+                    property_df = pd.DataFrame(property_counts).reset_index()
+                    property_df.columns = ['Property', 'Count']
+                    
+                    fig = px.bar(property_df, x='Property', y='Count',
+                                title='Bookings by Property',
+                                color='Count',
+                                color_continuous_scale='Viridis')
+                    st.plotly_chart(fig, use_container_width=True)
                 
                 st.markdown("---")
                 st.markdown("#### Export Data")
@@ -1462,7 +1993,7 @@ def render_search_analytics(manager, workbook):
                 with col1:
                     csv = df.to_csv(index=False)
                     st.download_button(
-                        "📥 Download Full Calendar (CSV)",
+                        "📥 Download CSV",
                         data=csv,
                         file_name=f"{selected_calendar}_{datetime.now().strftime('%Y%m%d')}.csv",
                         mime="text/csv"
@@ -1475,147 +2006,285 @@ def render_search_analytics(manager, workbook):
                     excel_data = output.getvalue()
                     
                     st.download_button(
-                        "📥 Download Full Calendar (Excel)",
+                        "📥 Download Excel",
                         data=excel_data,
                         file_name=f"{selected_calendar}_{datetime.now().strftime('%Y%m%d')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
             else:
-                st.info("No data available for analytics.")
-
-def render_settings():
-    """Render settings and configuration interface"""
-    st.markdown('<div class="section-header">⚙️ System Settings</div>', unsafe_allow_html=True)
-    
-    tab1, tab2, tab3 = st.tabs(["📧 Email Configuration", "📊 System Logs", "📝 Edit History"])
-    
-    with tab1:
-        st.markdown('<div class="email-card"><h3>Email Server Configuration</h3></div>', unsafe_allow_html=True)
-        
-        with st.form("email_config_form"):
-            st.markdown("Configure your SMTP email server settings to enable email functionality.")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                email = st.text_input(
-                    "Email Address",
-                    value=st.session_state.email_config.get('email', ''),
-                    placeholder="your-email@example.com"
-                )
-                server = st.text_input(
-                    "SMTP Server",
-                    value=st.session_state.email_config.get('server', ''),
-                    placeholder="smtp.gmail.com"
-                )
-            
-            with col2:
-                password = st.text_input(
-                    "Password",
-                    type="password",
-                    value=st.session_state.email_config.get('password', ''),
-                    placeholder="Your email password"
-                )
-                port = st.number_input(
-                    "SMTP Port",
-                    min_value=1,
-                    max_value=65535,
-                    value=st.session_state.email_config.get('port', 587)
-                )
-            
-            submitted = st.form_submit_button("💾 Save Configuration", type="primary")
-            
-            if submitted:
-                EmailManager.configure(email, password, server, port)
-                st.success("✅ Email configuration saved successfully!")
-                st.balloons()
-        
-        st.markdown("---")
-        st.markdown("#### Common SMTP Settings")
-        st.markdown("""
-        <div class="info-box">
-        <p><strong>Gmail:</strong> smtp.gmail.com (Port 587)<br>
-        <strong>Outlook:</strong> smtp-mail.outlook.com (Port 587)<br>
-        <strong>Yahoo:</strong> smtp.mail.yahoo.com (Port 587)<br>
-        <strong>Note:</strong> You may need to enable "Less secure app access" or use App Passwords for Gmail.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with tab2:
-        st.markdown("### System Activity Log")
-        
-        if st.session_state.logs:
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                filter_level = st.multiselect(
-                    "Filter by level",
-                    ["INFO", "SUCCESS", "WARNING", "ERROR"],
-                    default=["INFO", "SUCCESS", "WARNING", "ERROR"]
-                )
-            
-            with col2:
-                if st.button("🗑️ Clear Logs"):
-                    st.session_state.logs = []
-                    st.rerun()
-            
-            filtered_logs = [log for log in st.session_state.logs if log['level'] in filter_level]
-            
-            for log in filtered_logs:
-                level_class = f"log-{log['level'].lower()}"
-                st.markdown(
-                    f'<div class="log-entry {level_class}">'
-                    f'<strong>[{log["timestamp"]}]</strong> '
-                    f'<span style="color: #666;">[{log["level"]}]</span> '
-                    f'{log["message"]}'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-            
-            st.markdown("---")
-            df_logs = pd.DataFrame(st.session_state.logs)
-            csv = df_logs.to_csv(index=False)
-            st.download_button(
-                "📥 Download System Logs",
-                data=csv,
-                file_name=f"system_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No system logs available.")
+                st.info("No data available")
     
     with tab3:
-        st.markdown("### Edit History")
-        
-        if st.session_state.edit_history:
-            col1, col2 = st.columns([3, 1])
-            
-            with col2:
-                if st.button("🗑️ Clear History"):
-                    st.session_state.edit_history = []
-                    st.rerun()
-            
-            for edit in st.session_state.edit_history:
-                st.markdown(
-                    f'<div class="edit-panel">'
-                    f'<strong>{edit["action"]}</strong> at {edit["timestamp"]}<br>'
-                    f'<pre>{json.dumps(edit["details"], indent=2)}</pre>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-            
-            st.markdown("---")
-            df_edits = pd.DataFrame(st.session_state.edit_history)
-            csv = df_edits.to_csv(index=False)
-            st.download_button(
-                "📥 Download Edit History",
-                data=csv,
-                file_name=f"edit_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No edit history available.")
+        st.markdown("### 📈 Booking Trends")
+        st.info("Trend analysis coming soon - will show booking patterns over time")
 
+def render_templates(manager):
+    """Render template management interface"""
+    st.markdown('<div class="section-header">🎨 Booking Templates</div>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="template-card">
+        <h3 style="margin-top: 0; color: white;">✨ Template Library</h3>
+        <p style="color: white;">Save and reuse common booking patterns to speed up data entry</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    tab1, tab2 = st.tabs(["📚 Template Library", "➕ Create Template"])
+    
+    with tab1:
+        if st.session_state.templates:
+            st.markdown(f"### {len(st.session_state.templates)} Templates Available")
+            
+            for template in st.session_state.templates:
+                with st.expander(f"🎨 {template['name']} (Used {template['usage_count']} times)"):
+                    st.markdown(f"**Description:** {template['description']}")
+                    st.markdown(f"**Created:** {template['created']}")
+                    st.markdown(f"**ID:** {template['id']}")
+                    
+                    st.json(template['data'])
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button(f"🗑️ Delete", key=f"del_{template['id']}"):
+                            st.session_state.templates = [t for t in st.session_state.templates if t['id'] != template['id']]
+                            st.success("✅ Template deleted")
+                            st.rerun()
+                    
+                    with col2:
+                        st.info("Use this template in the 'Add Booking' tab")
+        else:
+            st.info("No templates saved yet. Create one in the 'Create Template' tab!")
+    
+    with tab2:
+        st.markdown("### Create New Template")
+        
+        with st.form("create_template_form"):
+            template_name = st.text_input("Template Name", placeholder="e.g., Standard Check-In")
+            template_desc = st.text_area("Description", placeholder="Describe when to use this template")
+            
+            st.markdown("#### Template Fields")
+            st.info("Add the fields and default values for this template")
+            
+            num_fields = st.number_input("Number of Fields", min_value=1, max_value=20, value=5)
+            
+            template_data = {}
+            cols = st.columns(2)
+            
+            for i in range(num_fields):
+                with cols[i % 2]:
+                    field_name = st.text_input(f"Field {i+1} Name", key=f"field_name_{i}")
+                    field_value = st.text_input(f"Field {i+1} Value", key=f"field_value_{i}")
+                    if field_name:
+                        template_data[field_name] = field_value
+            
+            submitted = st.form_submit_button("💾 Save Template", type="primary")
+            
+            if submitted:
+                if template_name and template_data:
+                    save_template(template_name, template_desc, template_data)
+                    st.success(f"✅ Template '{template_name}' saved!")
+                    st.balloons()
+                else:
+                    st.error("❌ Please provide template name and at least one field")
+
+def render_backup_restore(manager, workbook):
+    """Render backup and restore interface"""
+    st.markdown('<div class="section-header">💾 Backup & Restore</div>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="info-box">
+        <h3 style="margin-top: 0;">🛡️ Data Protection</h3>
+        <p>Create backups before making major changes and restore previous versions if needed.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Auto-backup toggle
+    st.session_state.auto_backup = st.toggle("🔄 Auto-backup before edits", value=st.session_state.auto_backup)
+    
+    if st.session_state.auto_backup:
+        st.success("✅ Auto-backup is enabled - backups will be created automatically before destructive operations")
+    else:
+        st.warning("⚠️ Auto-backup is disabled - you'll need to create backups manually")
+    
+    st.markdown("---")
+    
+    tab1, tab2 = st.tabs(["💾 Create Backup", "↩️ Restore Backup"])
+    
+    with tab1:
+        st.markdown("### Create Manual Backup")
+        
+        calendars = manager.get_calendar_sheets(workbook)
+        
+        if calendars:
+            selected_calendar = st.selectbox("Select Sheet to Backup", [cal['name'] for cal in calendars])
+            
+            if st.button("💾 Create Backup Now", type="primary", use_container_width=True):
+                with st.spinner("Creating backup..."):
+                    backup = create_backup(workbook, selected_calendar)
+                    if backup:
+                        st.success(f"✅ Backup created successfully!")
+                        st.json({
+                            'timestamp': backup['timestamp'],
+                            'sheet': backup['sheet'],
+                            'rows': backup['row_count'],
+                            'columns': backup['col_count']
+                        })
+                    else:
+                        st.error("❌ Backup failed")
+        else:
+            st.warning("No sheets available to backup")
+    
+    with tab2:
+        st.markdown("### Restore from Backup")
+        
+        if st.session_state.backup_history:
+            st.markdown(f"**{len(st.session_state.backup_history)} backups available**")
+            
+            for idx, backup in enumerate(reversed(st.session_state.backup_history)):
+                with st.expander(f"💾 Backup #{len(st.session_state.backup_history) - idx} - {backup['timestamp']}"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown(f"**Sheet:** {backup['sheet']}")
+                        st.markdown(f"**Workbook:** {backup['workbook']}")
+                    
+                    with col2:
+                        st.markdown(f"**Rows:** {backup['row_count']}")
+                        st.markdown(f"**Columns:** {backup['col_count']}")
+                    
+                    st.warning("⚠️ Restoring will overwrite current data!")
+                    
+                    if st.button(f"↩️ Restore This Backup", key=f"restore_{idx}"):
+                        confirm = st.checkbox(f"I confirm restoration", key=f"confirm_{idx}")
+                        if confirm:
+                            with st.spinner("Restoring backup..."):
+                                if restore_backup(backup, manager):
+                                    st.success("✅ Backup restored successfully!")
+                                    st.balloons()
+                                else:
+                                    st.error("❌ Restore failed")
+        else:
+            st.info("No backups available yet. Create your first backup in the 'Create Backup' tab!")
+        
+        st.markdown("---")
+        
+        if st.session_state.backup_history:
+            if st.button("🗑️ Clear All Backups", type="secondary"):
+                confirm_clear = st.checkbox("I confirm clearing all backups")
+                if confirm_clear:
+                    st.session_state.backup_history = []
+                    st.success("✅ All backups cleared")
+                    st.rerun()
+
+def render_edit_history():
+    """Render edit history log"""
+    st.markdown('<div class="section-header">📜 Edit History</div>', unsafe_allow_html=True)
+    
+    if not st.session_state.edit_history:
+        st.info("No edit history available")
+        return
+    
+    # Filter options
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        filter_action = st.multiselect(
+            "Filter by Action",
+            list(set([e['action'] for e in st.session_state.edit_history])),
+            default=list(set([e['action'] for e in st.session_state.edit_history]))
+        )
+    
+    with col2:
+        date_filter = st.date_input("Filter by Date", datetime.now().date())
+    
+    with col3:
+        if st.button("🗑️ Clear History", type="secondary"):
+            st.session_state.edit_history = []
+            st.rerun()
+    
+    # Display filtered history
+    filtered_history = [
+        e for e in st.session_state.edit_history 
+        if e['action'] in filter_action and e['timestamp'].startswith(date_filter.strftime('%Y-%m-%d'))
+    ]
+    
+    st.markdown(f"### Showing {len(filtered_history)} of {len(st.session_state.edit_history)} edits")
+    
+    for idx, edit in enumerate(reversed(filtered_history)):
+        with st.expander(f"Edit #{len(filtered_history) - idx} - {edit['timestamp']} - {edit['action']}"):
+            st.markdown(f"**User:** {edit['user']}")
+            st.markdown(f"**Action:** {edit['action']}")
+            st.markdown(f"**Timestamp:** {edit['timestamp']}")
+            st.markdown("**Details:**")
+            st.json(edit['details'])
+    
+    # Export history
+    if st.button("📥 Export Edit History"):
+        df_history = pd.DataFrame(st.session_state.edit_history)
+        csv = df_history.to_csv(index=False)
+        st.download_button(
+            "Download CSV",
+            data=csv,
+            file_name=f"edit_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+
+def render_system_logs():
+    """Render system logs"""
+    st.markdown('<div class="section-header">📊 System Logs</div>', unsafe_allow_html=True)
+    
+    if not st.session_state.logs:
+        st.info("No system logs available")
+        return
+    
+    # Filter options
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        filter_level = st.multiselect(
+            "Filter by Level",
+            ["INFO", "SUCCESS", "WARNING", "ERROR", "EMAIL"],
+            default=["INFO", "SUCCESS", "WARNING", "ERROR", "EMAIL"]
+        )
+    
+    with col2:
+        log_limit = st.number_input("Show Last N Logs", min_value=10, max_value=500, value=100)
+    
+    with col3:
+        if st.button("🗑️ Clear Logs"):
+            st.session_state.logs = []
+            st.rerun()
+    
+    # Display filtered logs
+    filtered_logs = [log for log in st.session_state.logs if log['level'] in filter_level]
+    displayed_logs = filtered_logs[-log_limit:]
+    
+    st.markdown(f"### Showing {len(displayed_logs)} of {len(st.session_state.logs)} logs")
+    
+    for log in reversed(displayed_logs):
+        level_class = f"log-{log['level'].lower()}"
+        st.markdown(
+            f'<div class="log-entry {level_class}">'
+            f'<strong>[{log["timestamp"]}]</strong> '
+            f'<span style="color: #666;">[{log["level"]}]</span> '
+            f'{log["message"]}'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    
+    # Export logs
+    st.markdown("---")
+    if st.button("📥 Export System Logs"):
+        df_logs = pd.DataFrame(st.session_state.logs)
+        csv = df_logs.to_csv(index=False)
+        st.download_button(
+            "Download CSV",
+            data=csv,
+            file_name=f"system_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+
+# Main entry point
 if __name__ == "__main__":
     if not st.session_state.authenticated:
         authenticate()
@@ -1627,3 +2296,4 @@ if __name__ == "__main__":
             if st.button("Return to Login"):
                 st.session_state.authenticated = False
                 st.rerun()
+
