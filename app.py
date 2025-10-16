@@ -2870,19 +2870,7 @@ def render_advanced_bulk_editor(manager, workbook):
                         st.balloons()
                         st.rerun()
 
-# Main entry point
-if __name__ == "__main__":
-    if not st.session_state.authenticated:
-        authenticate()
-    else:
-        if st.session_state.gc:
-            main_app()
-        else:
-            st.error("❌ Google Sheets connection not established. Please re-authenticate.")
-            if st.button("Return to Login"):
-                st.session_state.authenticated = False
-                st.rerun()
-
+# Moved main_app() definition BEFORE the main entry point to fix NameError
 def main_app():
     """Main application interface"""
     manager = st.session_state.gc
@@ -3018,3 +3006,17 @@ def main_app():
     
     elif view_mode == "System Logs":
         render_system_logs()
+
+
+# Main entry point
+if __name__ == "__main__":
+    if not st.session_state.authenticated:
+        authenticate()
+    else:
+        if st.session_state.gc:
+            main_app()
+        else:
+            st.error("❌ Google Sheets connection not established. Please re-authenticate.")
+            if st.button("Return to Login"):
+                st.session_state.authenticated = False
+                st.rerun()
